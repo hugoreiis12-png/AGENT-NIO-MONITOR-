@@ -59,14 +59,14 @@ class TestLlmReal:
 
         texto = await client.generate(
             USER.format(
-                projeto="V3yqT1MGvf0Ufg17",
-                recurso="JqOi9bhDIXzi8wKN",
+                tipo="execution_failed",
+                titulo="Processa Checkout falhou 9x",
                 severidade="critical",
-                n=9,
-                primeira="2026-10-11 16:30",
-                ultima="2026-10-12 16:30",
-                erro="Connection timeout",
-                modo="trigger",
+                fatos=(
+                    "Recurso: JqOi9bhDIXzi8wKN\nOcorrencias: 9\n"
+                    "Primeira falha: 2026-10-11 16:30\nUltima falha: 2026-10-12 16:30\n"
+                    "Erro: Connection timeout"
+                ),
             )
         )
         print(f"\n--- saida do modelo ---\n{texto}\n---")
@@ -108,7 +108,7 @@ class TestDegradacao:
         abertura, status = await w.write(
             {
                 "workflow_nome": "Processa Checkout",
-                "n": 5,
+                "ocorrencias": 5,
                 "primeira": "2026-10-12 08:00",
                 "erro": "Connection timeout",
             }
@@ -119,7 +119,7 @@ class TestDegradacao:
 
     async def test_llm_desligado_usa_fallback(self) -> None:
         w = AlertWriter(self._ClientQuebrado(OLLAMA, MODELO), enabled=False)
-        abertura, status = await w.write({"workflow_nome": "X", "n": 1})
+        abertura, status = await w.write({"workflow_nome": "X", "ocorrencias": 1})
         assert status == "desligado"
         assert abertura
 

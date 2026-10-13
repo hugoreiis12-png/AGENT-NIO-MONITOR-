@@ -92,7 +92,8 @@ class PortainerClient:
             raise PortainerApiError(
                 f"{resp.status_code} em {path}: a API key precisa de admin", resp.status_code
             )
-        resp.raise_for_status()
+        if resp.is_error:
+            raise PortainerApiError(f"{resp.status_code} em {path}", resp.status_code)
         return resp.json()
 
     async def list_endpoints(self) -> list[dict[str, Any]]:

@@ -1,0 +1,161 @@
+{
+  "name": "Hermes - Envio de Alertas por E-mail",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "agent-nio-monitor",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "a1f0c1d2-0001-4a00-9000-000000000001",
+      "name": "Recebe alerta do Hermes",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "agent-nio-monitor"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.body.to }}",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.body.subject }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c1d2-0002-4a00-9000-000000000002",
+      "name": "Payload valido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "nio@grupocampanha.com.br",
+        "toEmail": "={{ $json.body.to.join(',') }}",
+        "subject": "={{ $json.body.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body.body }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "a1f0c1d2-0003-4a00-9000-000000000003",
+      "name": "Envia e-mail",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        460,
+        -80
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "c0BwKiVHe5aWrYRk",
+          "name": "SMTP AUTOMACAO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ JSON.stringify({ok: true, to: $('Recebe alerta do Hermes').item.json.body.to.length, event_id: $('Recebe alerta do Hermes').item.json.body.metadata.event_id}) }}",
+        "options": {}
+      },
+      "id": "a1f0c1d2-0004-4a00-9000-000000000004",
+      "name": "Resposta OK",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        680,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "Payload invalido: 'to' (lista) e 'subject' sao obrigatorios"
+      },
+      "id": "a1f0c1d2-0005-4a00-9000-000000000005",
+      "name": "Rejeita payload",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        460,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Recebe alerta do Hermes": {
+      "main": [
+        [
+          {
+            "node": "Payload valido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Payload valido?": {
+      "main": [
+        [
+          {
+            "node": "Envia e-mail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rejeita payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envia e-mail": {
+      "main": [
+        [
+          {
+            "node": "Resposta OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -17,8 +17,9 @@ from agent_nio_monitor.store.repository import InMemoryRepository
 PTAI = "https://portainer.test"
 
 
-def _mock_endpoints() -> None:
+def _mock_endpoints(stacks: list[dict] | None = None) -> None:
     respx.get(f"{PTAI}/api/endpoints").mock(return_value=httpx.Response(200, json=[{"Id": 1}]))
+    respx.get(f"{PTAI}/api/stacks").mock(return_value=httpx.Response(200, json=stacks or []))
 
 
 def _mock_containers(containers: list[dict]) -> None:
@@ -91,3 +92,32 @@ class TestChecagemDeEstado:
         resultado = await col.check_state()
         assert resultado.collected == 0
         assert resultado.ok
+
+    @respx.mock
+    async def test_evento_leva_o_dono_e_o_ultimo_autor_da_stack(self) -> None:
+        repo = InMemoryRepository()
+        col = ContainerCollector(PortainerClient(PTAI, "tok"), repo)
+        _mock_endpoints([{"Name": "comprove", "CreatedBy": "admin", "UpdatedBy": "carlos"}])
+        rotulos = {"com.docker.compose.project": "comprove"}
+        _mock_containers([{"Id": "abc", "Names": ["/worker"], "State": "running",
+                            "Status": "Up", "Labels": rotulos}])
+        await col.check_state()
+        _mock_containers([{"Id": "abc", "Names": ["/worker"], "State": "exited",
+                            "Status": "Exited (1)", "Labels": rotulos}])
+        evento = (await col.check_state()).extra["eventos"][0]
+        assert evento.detail["stack"] == "comprove"
+        assert evento.detail["autor"] == "carlos"
+        assert evento.detail["responsavel_stack"] == "admin"
+
+    @respx.mock
+    async def test_stacks_fora_do_ar_nao_derruba_o_alerta(self) -> None:
+        repo = InMemoryRepository()
+        col = ContainerCollector(PortainerClient(PTAI, "tok"), repo)
+        _mock_endpoints()
+        respx.get(f"{PTAI}/api/stacks").mock(return_value=httpx.Response(500))
+        _mock_containers([{"Id": "abc", "Names": ["/w"], "State": "running", "Status": "Up"}])
+        await col.check_state()
+        _mock_containers([{"Id": "abc", "Names": ["/w"], "State": "exited", "Status": "Exited (1)"}])
+        eventos = (await col.check_state()).extra["eventos"]
+        assert len(eventos) == 1
+        assert "autor" not in eventos[0].detail

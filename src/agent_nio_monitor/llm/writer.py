@@ -11,6 +11,8 @@ critico.
 
 from __future__ import annotations
 
+import re
+
 import httpx
 import structlog
 
@@ -28,18 +30,23 @@ Regras:
 
 Responda SOMENTE com o paragrafo."""
 
-USER = """Contexto do alerta (ja redigido, sem segredo):
+USER = """Fatos do alerta (ja redigidos, sem segredo):
 
-Projeto: {projeto}
-Recurso: {recurso}
+Evento: {tipo}
+Titulo: {titulo}
 Severidade: {severidade}
-Ocorrencias: {n}
-Primeira falha: {primeira}
-Ultima falha: {ultima}
-Erro: {erro}
-Modo de execucao: {modo}
+{fatos}
 
+Use SOMENTE estes fatos. Nao cite data, hora ou numero que nao aparece acima.
 Escreva o paragrafo de abertura."""
+
+CAMPOS_DE_FATO = (
+    ("workflow_nome", "Recurso"), ("recurso", "Recurso"), ("stack", "Stack"),
+    ("ocorrencias", "Ocorrencias"), ("primeira", "Primeira falha"), ("ultima", "Ultima falha"),
+    ("erro", "Erro"), ("detalhe", "Detalhe"), ("resumo_diff", "Mudancas"),
+    ("autor", "Ultima alteracao por"),
+)
+MAX_FATO = 300
 
 
 class LLMUnavailable(RuntimeError):
@@ -103,12 +110,27 @@ class LlmClient:
             return False
 
 
+def _fatos(contexto: dict) -> str:
+    linhas = []
+    for chave, rotulo in CAMPOS_DE_FATO:
+        valor = contexto.get(chave)
+        if valor not in (None, ""):
+            linhas.append(f"{rotulo}: {str(valor)[:MAX_FATO]}")
+    return "\n".join(linhas)
+
+
+def _inventou_numero(texto: str, base: str) -> bool:
+    """Um 8B preenche lacuna com data/hora plausivel. Numero fora dos fatos = rejeita."""
+    return any(n not in base for n in re.findall(r"\d+", texto))
+
+
 def _fallback(contexto: dict) -> str:
     """Texto deterministico. Precisa ser utilizavel sozinho: e o que sai quando
     o LLM esta fora, e perder o alerta e pior que perder a eloquencia."""
+    if contexto.get("titulo") and not contexto.get("ocorrencias"):
+        return f"{contexto['titulo']}."
     nome = contexto.get("workflow_nome") or contexto.get("recurso") or "recurso"
-    n = contexto.get("n", 1)
-    partes = [f"{nome} falhou {n} vez(es)"]
+    partes = [f"{nome} falhou {contexto.get('ocorrencias', 1)} vez(es)"]
     if contexto.get("primeira"):
         partes.append(f"desde {contexto['primeira']}")
     frase = " ".join(partes) + "."
@@ -130,24 +152,20 @@ class AlertWriter:
         """
         if not self.enabled:
             return _fallback(contexto), "desligado"
+        fatos = _fatos(contexto)
+        prompt = USER.format(
+            tipo=contexto.get("tipo", "-"), titulo=contexto.get("titulo", "-"),
+            severidade=contexto.get("severidade", "-"), fatos=fatos,
+        )
         try:
-            prompt = USER.format(
-                projeto=contexto.get("projeto", "-"),
-                recurso=contexto.get("recurso", "-"),
-                severidade=contexto.get("severidade", "-"),
-                n=contexto.get("n", 1),
-                primeira=contexto.get("primeira", "-"),
-                ultima=contexto.get("ultima", "-"),
-                erro=contexto.get("erro") or "(sem mensagem de erro)",
-                modo=contexto.get("modo", "?"),
-            )
             texto = await self.client.generate(prompt)
-            # Um 8B pode devolver vazio, ou ecoar o prompt. Sanidade minima:
-            # o texto precisa existir, ser curto, e nao conter instrucao.
-            if not texto.strip() or len(texto) > 2000 or "Voce escreve o paragrafo" in texto:
-                log.warning("saida_do_llm_rejeitada", tamanho=len(texto))
-                return _fallback(contexto), "fallback"
-            return texto, "llm"
         except LLMUnavailable as exc:
             log.warning("llm_indisponivel_usando_fallback", erro=str(exc))
             return _fallback(contexto), "fallback"
+        if not texto.strip() or len(texto) > 2000 or "Voce escreve o paragrafo" in texto:
+            log.warning("saida_do_llm_rejeitada", tamanho=len(texto))
+            return _fallback(contexto), "fallback"
+        if _inventou_numero(texto, prompt):
+            log.warning("saida_do_llm_rejeitada_numero_inventado")
+            return _fallback(contexto), "fallback"
+        return texto, "llm"

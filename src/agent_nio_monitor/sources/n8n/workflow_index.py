@@ -1,4 +1,4 @@
-"""Indice workflow_id -> (nome, projectId), carregado uma vez e reutilizado."""
+"""Indice workflow_id -> (nome, projectId, autor), carregado uma vez e reutilizado."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ class WorkflowIndex:
         self._loaded = False
         self.names: dict[str, str] = {}
         self.projects: dict[str, str] = {}
+        self.authors: dict[str, str] = {}
 
     async def load(self) -> None:
         if self._loaded:
@@ -26,6 +27,9 @@ class WorkflowIndex:
                 projeto = next((s.get("projectId") for s in wf.get("shared", []) if s.get("projectId")), None)
                 if projeto:
                     self.projects[wid] = str(projeto)
+                autor = (wf.get("activeVersion") or {}).get("authors")
+                if isinstance(autor, str) and autor.strip():
+                    self.authors[wid] = autor.strip()
         except Exception as exc:  # noqa: BLE001 - nome/projeto sao opcionais, coleta nao pode morrer por isso
             log.warning("nomes_de_workflow_indisponiveis", erro=str(exc))
             return

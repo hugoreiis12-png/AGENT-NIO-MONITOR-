@@ -17,6 +17,7 @@ from .config.schema import AppConfig
 from .health import HealthState
 from .llm.writer import AlertWriter, LlmClient
 from .notify.mailer import DispatchResult, Notifier
+from .notify.people import people_by_project, portainer_users
 from .notify.resolver import RecipientResolver
 from .notify.templates import formatar_horas, render
 from .rules.engine import RuleEngine
@@ -60,7 +61,8 @@ class Agent:
                 verify_ssl=cfg.active.n8n.verify_ssl,
                 timeout=cfg.active.n8n.timeout_seconds,
             ),
-            people=_people(),
+            people=people_by_project(),
+            usuarios=portainer_users(),
             max_recipients=self.policy.max_recipients,
         )
         self.n8n = self.resolver.client
@@ -109,6 +111,7 @@ class Agent:
                         "workflow_name": nome,
                         "workflow_nome": nome,
                         "ocorrencias": streak.count,
+                        "autor": self.index.authors.get(workflow_id),
                         "primeira": primeiro,
                         "ultima": ultimo,
                         "notificar": decisao.notify,
@@ -132,7 +135,7 @@ class Agent:
             return DispatchResult(status="suppressed", channel="nenhuma")
 
         projeto = evento.tenant_id
-        destinatarios = await self.resolver.resolve_for_project(projeto)
+        destinatarios = await self.resolver.resolve_for_event(projeto, evento.detail)
         if destinatarios.source in ("people_yaml", "global_fallback", "nenhum"):
             log.warning(
                 "destinatario_por_fallback",
@@ -140,7 +143,10 @@ class Agent:
                 detalhe=destinatarios.detail,
             )
 
-        contexto = dict(evento.detail)
+        contexto = {
+            **evento.detail, "tipo": evento.event_type,
+            "titulo": evento.title, "severidade": evento.severity,
+        }
         abertura, status_llm = await self.writer.write(contexto)
         assunto, corpo = render(
             evento.detail.get("template", "generic"), event=evento,
@@ -204,6 +210,7 @@ class Agent:
         aqui centralizada porque workflow/container nao tem streak proprio."""
         decisao = self.rules.evaluate(event_type=evento.event_type, now=evento.ts)
         evento.severity = decisao.severity
+        evento.detail.setdefault("autor", self.index.authors.get(evento.resource_id or ""))
         evento.tenant_id = evento.tenant_id or self.index.projects.get(evento.resource_id or "")
         evento.detail["notificar"] = decisao.notify
         evento.detail["motivo_supressao"] = decisao.suppress_reason
@@ -258,17 +265,6 @@ def _build_container_collector(cfg: AppConfig, repo: Repository) -> ContainerCol
         return None
     client = PortainerClient(env.url, api_key, verify_ssl=env.verify_ssl, timeout=env.timeout_seconds)
     return ContainerCollector(client, repo)
-
-
-def _people() -> dict[str, list[str]]:
-    from pathlib import Path
-
-    import yaml
-
-    path = Path(__file__).resolve().parents[2] / "config" / "people.yaml"
-    if not path.exists():
-        return {}
-    return yaml.safe_load(path.read_text(encoding="utf-8")).get("projects", {})
 
 
 def build(cfg: AppConfig, repo: Repository | None = None) -> Agent:

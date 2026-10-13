@@ -14,11 +14,16 @@ foi notificado" e o modo de falha que faz um monitor virar furniture.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from typing import Any
 
 import structlog
 
 log = structlog.get_logger(__name__)
+
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+CAMPOS_DE_PESSOA = ("autor", "responsavel_stack")
 
 
 @dataclass
@@ -34,11 +39,13 @@ class RecipientResolver:
         n8n_client,  # noqa: ANN001
         people: dict[str, list[str]],
         *,
+        usuarios: dict[str, str] | None = None,
         global_fallback: list[str] | None = None,
         max_recipients: int = 10,
     ) -> None:
         self.client = n8n_client
         self.people = people or {}
+        self.usuarios = {k.lower(): v for k, v in (usuarios or {}).items()}
         self.global_fallback = global_fallback or []
         self.max_recipients = max_recipients
         self._user_by_id: dict[str, str] | None = None
@@ -86,6 +93,34 @@ class RecipientResolver:
 
         self._cache[project_id] = r
         return r
+
+    def resolve_pessoas(self, nomes: list[Any]) -> Resolution:
+        """'Quem mexeu' / dono da stack: e-mail embutido no texto ("Nome <e-mail>")
+        ou usuario do Portainer mapeado em `people.yaml: usuarios`."""
+        emails: list[str] = []
+        for nome in nomes:
+            texto = str(nome or "").strip()
+            achado = EMAIL_RE.search(texto)
+            if achado:
+                emails.append(achado.group(0))
+            elif texto.lower() in self.usuarios:
+                emails.append(self.usuarios[texto.lower()])
+            elif texto and texto.lower() != "import":
+                log.warning("pessoa_sem_email_mapeado", pessoa=texto)
+        return Resolution(emails=self._dedup(emails), source="autoria") if emails else Resolution()
+
+    async def resolve_for_event(self, project_id: str | None, detail: dict[str, Any]) -> Resolution:
+        """Responsavel do projeto/stack + quem mexeu no recurso."""
+        base = await self.resolve_for_project(project_id)
+        pessoas = self.resolve_pessoas([detail.get(c) for c in CAMPOS_DE_PESSOA])
+        if not pessoas.emails:
+            return base
+        fontes = [x for x in (base, pessoas) if x.emails]
+        return Resolution(
+            emails=self._dedup([e for x in fontes for e in x.emails]),
+            source="+".join(x.source for x in fontes),
+            detail=base.detail,
+        )
 
     async def resolve_for_portainer_resource(
         self, user_ids: list[str], tenant_hint: str | None

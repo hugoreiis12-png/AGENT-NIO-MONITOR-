@@ -208,7 +208,21 @@ def render(
     else:
         corpo = _BODY_SIMPLE.format(**d)
 
-    return assunto, f"{_HEAD.format(**d)}\n{corpo}".strip()
+    return assunto, f"{_HEAD.format(**d)}\n{corpo}{_quem_mexeu(contexto or {}, template)}".strip()
+
+
+def _quem_mexeu(contexto: dict, template: str) -> str:
+    """Quem alterou o recurso por ultimo e quem e dono da stack, quando se sabe."""
+    linhas = []
+    if contexto.get("stack"):
+        linhas.append(f"Stack: {contexto['stack']}")
+    if contexto.get("responsavel_stack"):
+        linhas.append(f"Responsavel pela stack: {contexto['responsavel_stack']}")
+    if contexto.get("autor") and template != "workflow_changed":
+        linhas.append(f"Ultima alteracao por: {contexto['autor']}")
+    if not linhas:
+        return ""
+    return "\n\nQuem mexeu\n-----------\n" + "\n".join(linhas)
 
 
 def formatar_horas(dt: datetime | None) -> str:

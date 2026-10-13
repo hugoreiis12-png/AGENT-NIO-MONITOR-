@@ -25,3 +25,10 @@ projects:
 # Deixar VAZIO e melhor do que errar: o agente registra 'sem destinatario'
 # e isso aparece no log com evidencia, em vez de mandar alerta para o lugar errado.
 global: []
+
+# Usuario do Portainer -> e-mail. Define quem recebe como "dono da stack" (CreatedBy)
+# e "quem mexeu por ultimo" (UpdatedBy). Usuario sem linha aqui NAO e notificado
+# (o log mostra `pessoa_sem_email_mapeado`). Usuarios vistos hoje: admin, carlos, felipe, hugo.
+usuarios: {}
+#  admin: fulano@empresa.com
+#  carlos: carlos@empresa.com

@@ -18,6 +18,8 @@ from .client import PortainerApiError, PortainerClient, parse_container
 
 log = structlog.get_logger(__name__)
 
+LABEL_STACK = "com.docker.compose.project"
+
 
 class ContainerCollector:
     source = "portainer"
@@ -34,6 +36,7 @@ class ContainerCollector:
             log.error("listagem_de_endpoints_falhou", erro=str(exc))
             return CollectorResult(error=str(exc))
 
+        stacks = await self._stacks_por_nome()
         total = 0
         for endpoint in endpoints:
             endpoint_id = endpoint.get("Id")
@@ -46,11 +49,19 @@ class ContainerCollector:
                 continue
             for row in containers:
                 total += 1
-                eventos.extend(self._processar_container(row))
+                eventos.extend(self._processar_container(row, stacks))
 
         return CollectorResult(collected=total, extra={"eventos": eventos})
 
-    def _processar_container(self, row: dict) -> list[EventRecord]:
+    async def _stacks_por_nome(self) -> dict[str, dict]:
+        """Falha aqui nao derruba o ciclo: o alerta sai, so sem o dono da stack."""
+        try:
+            return {str(s.get("Name")): s for s in await self.client.list_stacks()}
+        except PortainerApiError as exc:
+            log.warning("stacks_indisponiveis_alerta_sem_dono", erro=str(exc))
+            return {}
+
+    def _processar_container(self, row: dict, stacks: dict[str, dict]) -> list[EventRecord]:
         container = parse_container(row)
         container_id = container["container_id"]
         nome = container["name"]
@@ -63,13 +74,13 @@ class ContainerCollector:
             and container["state"] != "running"
         )
         if parou_agora:
-            eventos.append(self._evento_parado(container_id, nome, container))
+            eventos.append(self._evento_parado(container_id, nome, container, _dono(row, stacks)))
 
         ficou_unhealthy_agora = container["health"] == "unhealthy" and (
             anterior is None or anterior.get("health") != "unhealthy"
         )
         if ficou_unhealthy_agora:
-            eventos.append(self._evento_unhealthy(container_id, nome, container))
+            eventos.append(self._evento_unhealthy(container_id, nome, container, _dono(row, stacks)))
 
         self.repo.record_container_observation(
             container_id,
@@ -80,7 +91,7 @@ class ContainerCollector:
         )
         return eventos
 
-    def _evento_parado(self, container_id: str, nome: str, container: dict) -> EventRecord:
+    def _evento_parado(self, container_id: str, nome: str, container: dict, dono: dict) -> EventRecord:
         return EventRecord(
             id=new_event_id(),
             ts=now_utc(),
@@ -93,10 +104,11 @@ class ContainerCollector:
                 "recurso": nome,
                 "workflow_nome": nome,
                 "detalhe": f"Estado atual: {container['state']} ({container['status']})",
+                **dono,
             },
         )
 
-    def _evento_unhealthy(self, container_id: str, nome: str, container: dict) -> EventRecord:
+    def _evento_unhealthy(self, container_id: str, nome: str, container: dict, dono: dict) -> EventRecord:
         return EventRecord(
             id=new_event_id(),
             ts=now_utc(),
@@ -109,5 +121,14 @@ class ContainerCollector:
                 "recurso": nome,
                 "workflow_nome": nome,
                 "detalhe": f"Healthcheck falhando. Estado: {container['status']}",
+                **dono,
             },
         )
+
+
+def _dono(row: dict, stacks: dict[str, dict]) -> dict[str, str | None]:
+    nome = (row.get("Labels") or {}).get(LABEL_STACK)
+    stack = stacks.get(str(nome)) if nome else None
+    if stack is None:
+        return {}
+    return {"stack": str(nome), "autor": stack.get("UpdatedBy"), "responsavel_stack": stack.get("CreatedBy")}
