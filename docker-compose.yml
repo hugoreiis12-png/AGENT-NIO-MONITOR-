@@ -1,0 +1,22 @@
+# Stack do Portainer (deploy por Git). As variaveis abaixo sao preenchidas no
+# proprio Portainer (Stack > Environment variables) -- segredo NUNCA vai no repo.
+services:
+  agent-nio-monitor:
+    build: .
+    image: agent-nio-monitor:latest
+    container_name: agent-nio-monitor
+    restart: unless-stopped
+    environment:
+      N8N_API_KEY: ${N8N_API_KEY:?defina N8N_API_KEY}
+      PORTAINER_API_KEY: ${PORTAINER_API_KEY:?defina PORTAINER_API_KEY}
+      DATABASE_DSN: ${DATABASE_DSN:?defina DATABASE_DSN}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8099:8099"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8099/healthz/ready', timeout=8)"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      # O primeiro ciclo (backfill) pode segurar o servidor de saude por alguns minutos.
+      start_period: 300s
