@@ -22,3 +22,7 @@ def people_by_project() -> dict[str, list[str]]:
 
 def portainer_users() -> dict[str, str]:
     return _load().get("usuarios") or {}
+
+
+def exclusive_by_workflow() -> dict[str, list[str]]:
+    return _load().get("workflows") or {}

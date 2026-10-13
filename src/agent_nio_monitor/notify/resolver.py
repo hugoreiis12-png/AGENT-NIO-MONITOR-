@@ -40,11 +40,13 @@ class RecipientResolver:
         people: dict[str, list[str]],
         *,
         usuarios: dict[str, str] | None = None,
+        exclusivos: dict[str, list[str]] | None = None,
         global_fallback: list[str] | None = None,
         max_recipients: int = 10,
     ) -> None:
         self.client = n8n_client
         self.people = people or {}
+        self.exclusivos = exclusivos or {}
         self.usuarios = {k.lower(): v for k, v in (usuarios or {}).items()}
         self.global_fallback = global_fallback or []
         self.max_recipients = max_recipients
@@ -110,7 +112,11 @@ class RecipientResolver:
         return Resolution(emails=self._dedup(emails), source="autoria") if emails else Resolution()
 
     async def resolve_for_event(self, project_id: str | None, detail: dict[str, Any]) -> Resolution:
-        """Responsavel do projeto/stack + quem mexeu no recurso."""
+        """Responsavel do projeto/stack + quem mexeu no recurso. Workflow com
+        lista exclusiva em `people.yaml: workflows` ignora projeto e autor."""
+        exclusivo = self.exclusivos.get(str(detail.get("workflow_id")))
+        if exclusivo:
+            return Resolution(emails=self._dedup(exclusivo), source="workflow_exclusivo")
         base = await self.resolve_for_project(project_id)
         pessoas = self.resolve_pessoas([detail.get(c) for c in CAMPOS_DE_PESSOA])
         if not pessoas.emails:

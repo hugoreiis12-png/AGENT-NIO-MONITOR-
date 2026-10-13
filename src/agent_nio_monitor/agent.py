@@ -17,7 +17,7 @@ from .config.schema import AppConfig
 from .health import HealthState
 from .llm.writer import AlertWriter, LlmClient
 from .notify.mailer import DispatchResult, Notifier
-from .notify.people import people_by_project, portainer_users
+from .notify.people import exclusive_by_workflow, people_by_project, portainer_users
 from .notify.resolver import RecipientResolver
 from .notify.templates import formatar_horas, render
 from .rules.engine import RuleEngine
@@ -63,6 +63,7 @@ class Agent:
             ),
             people=people_by_project(),
             usuarios=portainer_users(),
+            exclusivos=exclusive_by_workflow(),
             max_recipients=self.policy.max_recipients,
         )
         self.n8n = self.resolver.client

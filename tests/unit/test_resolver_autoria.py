@@ -40,3 +40,46 @@ class TestUniaoComOResponsavel:
             None, {"autor": "carlos", "responsavel_stack": "admin"}
         )
         assert sorted(r.emails) == ["a@x.com", "c@x.com"]
+
+
+class TestWorkflowExclusivo:
+    async def test_lista_exclusiva_ignora_projeto_e_autor(self) -> None:
+        r = RecipientResolver(None, {"P1": ["dono@x.com"]}, exclusivos={"wf1": ["so@x.com"]})
+        res = await r.resolve_for_event("P1", {"workflow_id": "wf1", "autor": "Ana <ana@x.com>"})
+        assert res.emails == ["so@x.com"]
+
+    async def test_outro_workflow_segue_a_regra_normal(self) -> None:
+        r = RecipientResolver(None, {"P1": ["dono@x.com"]}, exclusivos={"wf1": ["so@x.com"]})
+        res = await r.resolve_for_event("P1", {"workflow_id": "wf2"})
+        assert res.emails == ["dono@x.com"]
+
+
+class TestPoliticaDoPeopleYaml:
+    """Regras combinadas com o dono: Rafael sai de 3 fluxos e entra onde e dono/autor."""
+
+    def _resolver(self) -> RecipientResolver:
+        from agent_nio_monitor.notify.people import (
+            exclusive_by_workflow,
+            people_by_project,
+            portainer_users,
+        )
+
+        return RecipientResolver(None, people_by_project(), usuarios=portainer_users(),
+                                 exclusivos=exclusive_by_workflow())
+
+    async def test_tres_fluxos_vao_so_para_o_hugo(self) -> None:
+        for wid in ("nATlDqPBknIcPaW3", "STfrlbTnTeuBDntf", "jCWyCWHK1XMhckeF"):
+            r = await self._resolver().resolve_for_event(
+                "wGiMpmFFLBhiwtFm", {"workflow_id": wid, "autor": "Rafael Barboza"})
+            assert r.emails == ["hugo.reis@grupocampanha.com.br"], wid
+
+    async def test_workflow_do_rafael_notifica_dono_do_projeto_e_o_autor(self) -> None:
+        r = await self._resolver().resolve_for_event(
+            "wGiMpmFFLBhiwtFm", {"workflow_id": "outro", "autor": "Rafael Barboza"})
+        assert "rafael.barboza@grupocampanha.com.br" in r.emails
+
+    async def test_stack_do_portainer_notifica_dono_e_ultimo_autor(self) -> None:
+        r = await self._resolver().resolve_for_event(
+            None, {"autor": "felipe", "responsavel_stack": "carlos"})
+        assert sorted(r.emails) == ["carlos.henrique@grupocampanha.com.br",
+                                    "felipe.chaves@grupocampanha.com.br"]
