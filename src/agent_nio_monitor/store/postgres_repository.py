@@ -346,6 +346,17 @@ class PostgresRepository(Repository):
             )
             conn.commit()
 
+    def last_workflow_snapshot(self, workflow_id: str) -> dict[str, Any] | None:
+        with self.db.connection() as conn:
+            row = conn.execute(
+                sql.SQL(
+                    "SELECT workflow_id, version_id, active, body FROM {t} "
+                    "WHERE workflow_id = %s ORDER BY captured_at DESC LIMIT 1"
+                ).format(t=self._t("workflow_snapshot")),
+                (workflow_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def upsert_resource(self, **kwargs: Any) -> None:
         with self.db.connection() as conn:
             conn.execute(

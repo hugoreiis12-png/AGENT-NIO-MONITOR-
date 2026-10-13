@@ -1,9 +1,8 @@
-"""Pipeline principal. Cada estagio e isolado e testavel; o scheduler apenas
-repetem o que a CLI roda uma vez.
+"""Entrypoint da CLI: argparse, boot do health server e o scheduler.
 
-Ordem deliberada:Capabilities (D2) -> health sobe -> coleta -> regra -> texto ->
-envio -> registro. Saude ANTES da coleta para que o cron externo veja o processo
-desde o primeiro segundo.
+A classe `Agent` (o pipeline em si) mora em `agent.py` -- aqui so se monta o
+processo em torno dela. `Agent` e `build` ficam reexportados porque
+`agent_nio_monitor.main:Agent` e contrato publico (usado por teste e script).
 """
 
 from __future__ import annotations
@@ -12,23 +11,16 @@ import argparse
 import asyncio
 import signal
 import sys
-from typing import Any
 
 import structlog
 
+from .agent import Agent, build
 from .capabilities import CapabilityReport, capability_rows, detect, render_table
-from .config.loader import ConfigError, load, load_policy
+from .config.loader import ConfigError, load
 from .config.schema import AppConfig
-from .health import HealthServer, HealthState
-from .llm.writer import AlertWriter, LlmClient
-from .notify.mailer import DispatchResult, Notifier
-from .notify.resolver import RecipientResolver
-from .notify.templates import formatar_horas, render
-from .rules.engine import RuleEngine
-from .sources.n8n.client import N8NClient
-from .sources.n8n.collector import ExecutionErrorCollector
-from .store.postgres_repository import PostgresRepository
-from .store.repository import EventRecord, Repository, new_event_id, now_utc
+from .health import HealthServer
+
+__all__ = ["Agent", "build", "main"]
 
 log = structlog.get_logger()
 
@@ -47,217 +39,6 @@ def setup_logging(level: str) -> None:
             getattr(__import__("logging"), level.upper(), 20)
         ),
         cache_logger_on_first_use=True,
-    )
-
-
-class Agent:
-    def __init__(self, cfg: AppConfig, repo: Repository) -> None:
-        self.cfg = cfg
-        self.repo = repo
-        self.policy = load_policy()
-        self.rules = RuleEngine(self.policy)
-        self.health = HealthState()
-        self.llm = LlmClient(
-            cfg.llm.base_url, cfg.llm.model,
-            timeout=cfg.llm.timeout_seconds,
-            num_ctx=cfg.llm.num_ctx,
-            temperature=cfg.llm.temperature,
-            max_tokens=cfg.llm.max_tokens,
-        )
-        self.writer = AlertWriter(self.llm, enabled=cfg.llm.fallback_to_template)
-        self.notifier = Notifier(
-            webhook_url=f"{cfg.mail.webhook_url}{cfg.mail.webhook_path}",
-            timeout=cfg.mail.timeout_seconds,
-            max_attempts=cfg.mail.max_attempts,
-            verify_ssl=cfg.active.n8n.verify_ssl,
-        )
-        self.resolver = RecipientResolver(
-            N8NClient(
-                _active_url(cfg),
-                _secret(cfg),
-                verify_ssl=cfg.active.n8n.verify_ssl,
-                timeout=cfg.active.n8n.timeout_seconds,
-            ),
-            people=_people(),
-            max_recipients=self.policy.max_recipients,
-        )
-        self.n8n = self.resolver.client
-
-    # ------------------------------------------------------------ ciclo n8n
-
-    async def collect_execution_errors(self) -> list[EventRecord]:
-        collector = ExecutionErrorCollector(self.n8n, self.repo)
-        nomes = await self._workflow_names()
-        resultado = await collector.run(name_by_id=nomes)
-        self.health.mark("n8n_executions", resultado.ok)
-        if resultado.gap:
-            self.health.gaps_detected += 1
-
-        if not resultado.collected:
-            return []
-
-        # O streak ja foi acumulado pelo coletor. Aqui so se DECIDE o que fazer.
-        eventos: list[EventRecord] = []
-        for workflow_id, streak in resultado.extra.get("streaks", {}).items():
-            nome = getattr(streak, "workflow_name", None) or workflow_id
-            decisao = self.rules.evaluate(
-                event_type="execution_failed",
-                streak_count=streak.count,
-                last_notified_at=streak.last_notified_at,
-                now=now_utc(),
-            )
-            primeiro = formatar_horas(streak.first_at)
-            ultimo = formatar_horas(streak.last_at)
-            eventos.append(
-                EventRecord(
-                    id=new_event_id(),
-                    ts=now_utc(),
-                    source="n8n",
-                    event_type="execution_failed",
-                    severity=decisao.severity,
-                    title=f"{nome} falhou {streak.count}x",
-                    tenant_id=getattr(streak, "tenant_id", None),
-                    resource_id=workflow_id,
-                    streak_count=streak.count,
-                    detail={
-                        "workflow_id": workflow_id,
-                        "workflow_name": nome,
-                        "ocorrencias": streak.count,
-                        "primeira": primeiro,
-                        "ultima": ultimo,
-                        "notificar": decisao.notify,
-                        "motivo_supressao": decisao.suppress_reason,
-                    },
-                )
-            )
-        return eventos
-
-    async def _workflow_names(self) -> dict[str, str]:
-        cache = getattr(self, "_names_cache", None)
-        if cache is None:
-            nomes: dict[str, str] = {}
-            try:
-                async for wf in self.n8n.iter_workflows():
-                    nomes[str(wf.get("id"))] = str(wf.get("name") or wf.get("id"))
-            except Exception as exc:  # noqa: BLE001 - nome e opcional, coleta nao pode morrer por isso
-                log.warning("nomes_de_workflow_indisponiveis", erro=str(exc))
-            self._names_cache = nomes
-        return self._names_cache
-
-    # -------------------------------------------------------- pipeline de alerta
-
-    async def dispatch(self, evento: EventRecord) -> DispatchResult:
-        decisao_texto = evento.detail.get("notificar", True)
-        if not decisao_texto:
-            log.info(
-                "evento_registrado_sem_notificar",
-                evento=evento.title,
-                motivo=evento.detail.get("motivo_supressao"),
-            )
-            return DispatchResult(status="suppressed", channel="nenhuma")
-
-        projeto = evento.tenant_id
-        destinatarios = await self.resolver.resolve_for_project(projeto)
-        if destinatarios.source in ("people_yaml", "global_fallback", "nenhum"):
-            log.warning(
-                "destinatario_por_fallback",
-                fonte=destinatarios.source,
-                detalhe=destinatarios.detail,
-            )
-
-        contexto = dict(evento.detail)
-        abertura, status_llm = await self.writer.write(contexto)
-        assunto, corpo = render(
-            _template_para(evento), event=evento,
-            contexto={**contexto, "abertura": abertura},
-        )
-        corpo = f"{abertura}\n{corpo}"
-
-        resultado = await self.notifier.send(
-            recipients=destinatarios.emails,
-            subject=assunto,
-            body=corpo,
-            n8n_up=bool(self.health.n8n_up is not False),
-            severity=evento.severity,
-            metadata={
-                "event_id": str(evento.id),
-                "streak": evento.streak_count,
-                "llm": status_llm,
-            },
-        )
-
-        self.repo.save_notification(
-            event_id=evento.id,
-            channel=resultado.channel,
-            recipients=resultado.emails,
-            subject=assunto,
-            body=corpo,
-            status=resultado.status,
-            error=resultado.error,
-            attempts=resultado.attempts,
-        )
-        if resultado.status in ("sent", "sent_to_log") and evento.resource_id:
-            self.repo.mark_streak_notified(evento.resource_id, now_utc())
-        return resultado
-
-    async def run_once(self) -> dict[str, Any]:
-        inicio = now_utc()
-        eventos = await self.collect_execution_errors()
-        enviados = 0
-        for e in eventos:
-            self.repo.save_event(e)
-            r = await self.dispatch(e)
-            if r.status in ("sent", "sent_to_log"):
-                enviados += 1
-        return {
-            "eventos": len(eventos),
-            "enviados": enviados,
-            "ms": int((now_utc() - inicio).total_seconds() * 1000),
-        }
-
-
-def _template_para(evento: EventRecord) -> str:
-    return "workflow_failing" if evento.streak_count > 1 else "execution_failed"
-
-
-def _active_url(cfg: AppConfig) -> str:
-    return cfg.active.n8n.url
-
-
-def _secret(cfg: AppConfig) -> str:
-    import os
-
-    return os.environ.get(cfg.active.n8n.api_key_env, "")
-
-
-def _people() -> dict[str, list[str]]:
-    from pathlib import Path
-
-    import yaml
-
-    path = Path(__file__).resolve().parents[2] / "config" / "people.yaml"
-    if not path.exists():
-        return {}
-    return yaml.safe_load(path.read_text(encoding="utf-8")).get("projects", {})
-
-
-def build(cfg: AppConfig, repo: Repository | None = None) -> Agent:
-    if repo is None:
-        db = _make_db(cfg)
-        db.open()
-        db.ensure_partitions()
-        repo = PostgresRepository(db)
-    return Agent(cfg, repo)
-
-
-def _make_db(cfg: AppConfig):  # noqa: ANN202
-    from .store.db import Database
-
-    dsn = cfg.database.dsn.replace("${DATABASE_DSN}", "")
-    if not dsn:
-        raise ConfigError("DATABASE_DSN ausente (ver .env.example)")
-    return Database(
-        dsn, cfg.database.db_schema, cfg.database.pool_min, cfg.database.pool_max
     )
 
 
@@ -325,6 +106,8 @@ def main() -> int:
         await agent.llm.aclose()
         await agent.notifier.aclose()
         await agent.n8n.aclose()
+        if agent.containers is not None:
+            await agent.containers.client.aclose()
         log.info("agent_encerrado")
 
     asyncio.run(_run())
@@ -357,18 +140,29 @@ def _instala_handlers_de_sinal(stop: asyncio.Event) -> None:
 
 
 async def _agenda(agent: Agent, stop: asyncio.Event) -> None:
-    """Cadencias do plano: erro 60s, estado 300s, corpo 900s.
+    """Cadencias do plano: erro 60s, estado de workflow 300s, diff completo
+    900s, estado de container 60s.
 
-    Deliberadamente NAO usa APScheduler ainda: quatro timers com asyncio bastam,
-    e APScheduler traria job em disco (persistencia) que nao precisamos. Se
+    Deliberadamente NAO usa APScheduler ainda: timers com asyncio bastam, e
+    APScheduler traria job em disco (persistencia) que nao precisamos. Se
     aparecer janela de manutenção, ai sim.
+
+    `reconcile` (3600s) fica pendente -- e um ciclo de auditoria de recursos
+    (`resource` table) distinto de T5/T6/T7, nao coberto por esta fiacao.
+    `containers_stats` tambem fica pendente -- enriquece a observacao com
+    cpu/mem, mas nao decide alerta (ver docstring de `ContainerCollector`).
     """
-    intervals = {
-        "executions": agent.cfg.polling.execution_errors_seconds,
-        "workflows_state": agent.cfg.polling.workflow_active_seconds,
-        "workflows_full": agent.cfg.polling.workflow_full_seconds,
-        "reconcile": agent.cfg.polling.reconciliation_seconds,
+    jobs = {
+        "executions": (agent.cfg.polling.execution_errors_seconds, agent.run_once),
+        "workflows_state": (agent.cfg.polling.workflow_active_seconds, agent.check_workflows_active),
+        "workflows_full": (agent.cfg.polling.workflow_full_seconds, agent.check_workflows_full),
+        "containers_state": (agent.cfg.polling.container_state_seconds, agent.check_containers),
     }
+    pendentes = {
+        "reconcile": agent.cfg.polling.reconciliation_seconds,
+        "containers_stats": agent.cfg.polling.container_stats_seconds,
+    }
+    intervals = {nome: intervalo for nome, (intervalo, _) in jobs.items()} | pendentes
     proximos = {nome: 0.0 for nome in intervals}
     loop = asyncio.get_running_loop()
     while not stop.is_set():
@@ -377,8 +171,8 @@ async def _agenda(agent: Agent, stop: asyncio.Event) -> None:
             if agora >= proximos[nome]:
                 proximos[nome] = agora + intervalo
                 try:
-                    if nome == "executions":
-                        await agent.run_once()
+                    if nome in jobs:
+                        await jobs[nome][1]()
                     else:
                         log.debug("job_pendente", job=nome)
                 except Exception as exc:  # noqa: BLE001 - um job nao derruba o agente
@@ -388,6 +182,3 @@ async def _agenda(agent: Agent, stop: asyncio.Event) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-

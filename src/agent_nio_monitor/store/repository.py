@@ -152,6 +152,11 @@ class Repository(ABC):
     def save_workflow_snapshot(self, workflow_id: str, version_id: str | None, active: bool, body: Any) -> None: ...
 
     @abstractmethod
+    def last_workflow_snapshot(self, workflow_id: str) -> dict[str, Any] | None:
+        """Snapshot mais recente. E a base de comparacao do diff estrutural (T5):
+        sem ele, cada ciclo compararia contra nada e nunca detectaria mudanca."""
+
+    @abstractmethod
     def upsert_resource(self, **kwargs: Any) -> None: ...
 
     @abstractmethod
@@ -291,6 +296,10 @@ class InMemoryRepository(Repository):
                 "captured_at": datetime.now(UTC),
             }
         )
+
+    def last_workflow_snapshot(self, workflow_id: str) -> dict[str, Any] | None:
+        historico = self.snapshots.get(workflow_id)
+        return historico[-1] if historico else None
 
     def upsert_resource(self, **kwargs: Any) -> None:
         key = (kwargs["source"], kwargs["kind"], kwargs["external_id"])
