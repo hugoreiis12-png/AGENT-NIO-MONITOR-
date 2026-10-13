@@ -39,6 +39,9 @@ polling:
 mail:
   webhook_url: "http://192.168.0.160:5678"
   webhook_path: "/webhook/agent-nio-monitor"
+  # Arte do e-mail HTML (assets/email no repositorio, servida pelo GitHub).
+  assets_base_url: "https://raw.githubusercontent.com/hugoreiis12-png/AGENT-NIO-MONITOR-/main/assets/email"
+  support_email: "help@jfcagro.com.br"
 
 # O LLM ANALISA o erro e REDIGE o alerta. Nao decide severidade nem destinatario.
 # Qwen no vLLM local (API compativel com OpenAI).

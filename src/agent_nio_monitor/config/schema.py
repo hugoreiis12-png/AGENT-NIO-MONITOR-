@@ -47,6 +47,10 @@ class MailConfig(BaseModel):
     webhook_path: str = "/webhook/agent-nio-monitor"
     timeout_seconds: float = Field(default=15.0, gt=0)
     max_attempts: int = Field(default=3, ge=1, le=10)
+    # Imagens do e-mail HTML (logo e herois) ficam hospedadas; sem isso o e-mail
+    # ainda mostra todo o texto, so perde a arte.
+    assets_base_url: str = ""
+    support_email: str = ""
 
 
 class LlmConfig(BaseModel):
