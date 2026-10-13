@@ -63,11 +63,12 @@
         "fromEmail": "nio@grupocampanha.com.br",
         "toEmail": "={{ $json.body.to.join(',') }}",
         "subject": "={{ $json.body.subject }}",
-        "emailFormat": "text",
+        "emailFormat": "both",
         "text": "={{ $json.body.body }}",
         "options": {
           "appendAttribution": false
-        }
+        },
+        "html": "={{ $json.body.html || ('<pre>' + $json.body.body + '</pre>') }}"
       },
       "id": "a1f0c1d2-0003-4a00-9000-000000000003",
       "name": "Envia e-mail",

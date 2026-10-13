@@ -19,6 +19,8 @@ from .llm.analyst import AlertAnalyst
 from .llm.client import LlmClient
 from .notify.compose import compor
 from .notify.mailer import DispatchResult, Notifier
+from .notify.pipeline import EventPipeline
+from .notify.resolution import ResolutionChecker
 from .notify.people import exclusive_by_workflow, people_by_project, portainer_users
 from .notify.resolver import RecipientResolver
 from .notify.templates import formatar_horas
@@ -29,13 +31,14 @@ from .sources.n8n.workflow_index import WorkflowIndex
 from .sources.n8n.workflow_monitor import WorkflowMonitor
 from .sources.portainer.suite import build_portainer
 from .store.postgres_repository import PostgresRepository
+from .store.queue import InMemoryQueue, NotificationQueue, PostgresQueue
 from .store.repository import EventRecord, Repository, new_event_id, now_utc
 
 log = structlog.get_logger()
 
 
 class Agent:
-    def __init__(self, cfg: AppConfig, repo: Repository) -> None:
+    def __init__(self, cfg: AppConfig, repo: Repository, queue: NotificationQueue | None = None) -> None:
         self.cfg = cfg
         self.repo = repo
         self.policy = load_policy()
@@ -70,6 +73,14 @@ class Agent:
         self.index = WorkflowIndex(self.n8n)
         self.workflow_monitor = WorkflowMonitor(self.n8n, self.repo)
         self.containers, self.stacks, self.resources = build_portainer(cfg, self.repo) or (None, None, None)
+        self.pipeline = EventPipeline(
+            repo=self.repo, queue=queue if queue is not None else InMemoryQueue(), rules=self.rules,
+            polling=cfg.polling, health=self.health, dispatch=self.dispatch,
+            checker=ResolutionChecker(
+                containers=self.containers, resources=self.resources, n8n=self.n8n, repo=self.repo,
+                limites=cfg.policy.thresholds,
+            ),
+        )
 
     # ------------------------------------------------------------ ciclo n8n
 
@@ -114,6 +125,7 @@ class Agent:
                         "workflow_name": nome,
                         "workflow_nome": nome,
                         "ocorrencias": streak.count,
+                        "ultima_falha_ts": streak.last_at.isoformat(),
                         "autor": self.index.authors.get(workflow_id),
                         "erro": falha.error_msg if falha else None,
                         "no": falha.last_node if falha else None,
@@ -185,23 +197,20 @@ class Agent:
     async def run_once(self) -> dict[str, Any]:
         inicio = now_utc()
         eventos = await self.collect_execution_errors()
-        enviados = await self.process_events(eventos)
+        enfileirados = await self.process_events(eventos)
         return {
             "eventos": len(eventos),
-            "enviados": enviados,
+            "enfileirados": enfileirados,
             "ms": int((now_utc() - inicio).total_seconds() * 1000),
         }
 
     async def process_events(self, eventos: list[EventRecord]) -> int:
-        """Salva e despacha. Compartilhado por `run_once` e pelos ciclos T5/T6
-        -- um unico lugar decide o que acontece depois que um evento nasce."""
-        enviados = 0
-        for e in eventos:
-            self.repo.save_event(e)
-            r = await self.dispatch(e)
-            if r.status in ("sent", "sent_to_log"):
-                enviados += 1
-        return enviados
+        """Grava e enfileira. Quem envia e a fila (`flush_queue`), que antes reconfere
+        se o problema continua -- um unico lugar para todos os coletores."""
+        return self.pipeline.enqueue(eventos)
+
+    async def flush_queue(self) -> dict[str, int]:
+        return await self.pipeline.flush()
 
     # --------------------------------------------------------- ciclos T5/T6
 
@@ -222,11 +231,6 @@ class Agent:
         self.health.mark(chave, resultado.ok)
         eventos = [self._decidir(e) for e in resultado.extra.get("eventos", [])]
         return await self.process_events(eventos)
-
-    async def check_workflows_active(self) -> int:
-        await self.index.load()
-        resultado = await self.workflow_monitor.check_active_state(name_by_id=self.index.names)
-        return await self._ciclo(resultado, "n8n_workflows_state")
 
     async def check_workflows_full(self) -> int:
         await self.index.load()
@@ -263,8 +267,9 @@ def build(cfg: AppConfig, repo: Repository | None = None) -> Agent:
     if repo is None:
         db = _make_db(cfg)
         db.open()
+        db.migrate()
         db.ensure_partitions()
-        repo = PostgresRepository(db)
+        return Agent(cfg, PostgresRepository(db), PostgresQueue(db))
     return Agent(cfg, repo)
 
 

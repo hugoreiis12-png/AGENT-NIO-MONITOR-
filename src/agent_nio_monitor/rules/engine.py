@@ -39,6 +39,12 @@ class RuleEngine:
             for et in rule.event_types:
                 self._by_type.setdefault(et, []).append(rule)
 
+    def re_notify_minutes(self, event_type: str) -> int:
+        """Janela em que o mesmo alerta nao se repete (regra do tipo, ou o padrao)."""
+        regras = self._by_type.get(event_type)
+        especifica = regras[0].re_notify_after_minutes if regras else None
+        return especifica if especifica is not None else self.policy.aggregation.re_notify_after_minutes
+
     def evaluate(
         self,
         *,

@@ -32,10 +32,10 @@ thresholds:
   # Loop de reinicio: N reinicios dentro da janela.
   restart_loop_count: 3
   restart_loop_window_minutes: 10
-  # Consumo: precisa ficar acima do limite por N coletas seguidas (5 min cada).
+  # Consumo: precisa ficar acima do limite por N coletas seguidas (coletas de 60 s).
   cpu_host_pct: 80      # % do CPU total do host usado pelo container
   mem_pct: 90           # % do limite de memoria do container
-  sustained_samples: 3
+  sustained_samples: 5   # coletas de 60 s: ~5 min acima do limite
 
 rules:
   # Falha repetida de workflow e o sinal de maior valor: os horarios observados

@@ -156,40 +156,41 @@ def _instala_handlers_de_sinal(stop: asyncio.Event) -> None:
 
 
 async def _agenda(agent: Agent, stop: asyncio.Event) -> None:
-    """Cadencias do plano: erro 60s, estado de workflow 300s, diff completo
-    900s, estado de container 60s, stacks e consumo 300s.
+    """Coleta e disparo entre 25 s e 1 min: erros e containers 30 s; workflows (diff,
+    ativacao e criacao), stacks e consumo 60 s; a fila de disparo reconfere a cada 30 s.
 
-    Deliberadamente NAO usa APScheduler ainda: timers com asyncio bastam, e
-    APScheduler traria job em disco (persistencia) que nao precisamos.
-
-    `reconcile` (3600s) fica pendente -- e um ciclo de auditoria de recursos
-    (`resource` table) distinto dos coletores, nao coberto por esta fiacao.
+    Cada job tem o PROPRIO laco: o ciclo lento de workflows (leitura de 11 MB) nao atrasa
+    os de 30 s, e o mesmo job nunca roda sobreposto. Deliberadamente NAO usa APScheduler:
+    timers com asyncio bastam e nao precisamos de job em disco.
     """
+    p = agent.cfg.polling
     jobs = {
-        "executions": (agent.cfg.polling.execution_errors_seconds, agent.run_once),
-        "workflows_state": (agent.cfg.polling.workflow_active_seconds, agent.check_workflows_active),
-        "workflows_full": (agent.cfg.polling.workflow_full_seconds, agent.check_workflows_full),
-        "containers_state": (agent.cfg.polling.container_state_seconds, agent.check_containers),
-        "stacks": (agent.cfg.polling.stack_changes_seconds, agent.check_stacks),
-        "containers_stats": (agent.cfg.polling.container_stats_seconds, agent.check_container_resources),
+        "executions": (p.execution_errors_seconds, agent.run_once),
+        "workflows_full": (p.workflow_full_seconds, agent.check_workflows_full),
+        "containers_state": (p.container_state_seconds, agent.check_containers),
+        "stacks": (p.stack_changes_seconds, agent.check_stacks),
+        "containers_stats": (p.container_stats_seconds, agent.check_container_resources),
+        "fila": (p.queue_seconds, agent.flush_queue),
     }
-    pendentes = {"reconcile": agent.cfg.polling.reconciliation_seconds}
-    intervals = {nome: intervalo for nome, (intervalo, _) in jobs.items()} | pendentes
-    proximos = {nome: 0.0 for nome in intervals}
+    await asyncio.gather(*(_laco_do_job(nome, intervalo, funcao, stop) for nome, (intervalo, funcao) in jobs.items()))
+
+
+async def _laco_do_job(nome: str, intervalo: float, funcao, stop: asyncio.Event) -> None:  # noqa: ANN001
     loop = asyncio.get_running_loop()
     while not stop.is_set():
-        agora = loop.time()
-        for nome, intervalo in intervals.items():
-            if agora >= proximos[nome]:
-                proximos[nome] = agora + intervalo
-                try:
-                    if nome in jobs:
-                        await jobs[nome][1]()
-                    else:
-                        log.debug("job_pendente", job=nome)
-                except Exception as exc:  # noqa: BLE001 - um job nao derruba o agente
-                    log.error("job_falhou", job=nome, erro=str(exc))
-        await asyncio.sleep(1)
+        inicio = loop.time()
+        try:
+            await funcao()
+        except Exception as exc:  # noqa: BLE001 - um job nao derruba o agente
+            log.error("job_falhou", job=nome, erro=str(exc))
+        duracao = loop.time() - inicio
+        log.debug("ciclo_duracao_ms", job=nome, ms=int(duracao * 1000))
+        if duracao > intervalo:
+            log.warning("ciclo_mais_lento_que_o_intervalo", job=nome, ms=int(duracao * 1000), intervalo_s=intervalo)
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=max(intervalo - duracao, 0))
+        except TimeoutError:
+            continue
 
 
 if __name__ == "__main__":

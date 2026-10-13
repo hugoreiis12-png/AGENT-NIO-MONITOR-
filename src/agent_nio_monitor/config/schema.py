@@ -23,18 +23,18 @@ class EnvironmentConfig(BaseModel):
 
 
 class PollingConfig(BaseModel):
-    """Cadencias distintas porque o custo e assimetrico (ADR D6).
+    """Coleta e disparo entre 25 s e 1 min (decisao do dono).
 
-    Medido na instancia real: `GET /api/v1/workflows` devolve 11,2 MB.
-    A 60 s isso e 16 GB/dia. Por isso conteudo e lento e estado e mais rapido.
+    O piso protege as fontes (`GET /api/v1/workflows` devolve 11,2 MB: a 60 s ja sao
+    ~16 GB/dia) e o teto garante que o alerta chegue em ate ~1 ciclo + a fila.
     """
 
-    execution_errors_seconds: float = Field(default=60.0, gt=0)
-    workflow_active_seconds: float = Field(default=300.0, gt=0)
-    workflow_full_seconds: float = Field(default=900.0, gt=0)
-    container_state_seconds: float = Field(default=60.0, gt=0)
-    container_stats_seconds: float = Field(default=300.0, gt=0)
-    stack_changes_seconds: float = Field(default=300.0, gt=0)
+    execution_errors_seconds: float = Field(default=30.0, ge=25.0, le=60.0)
+    workflow_full_seconds: float = Field(default=60.0, ge=25.0, le=60.0)
+    container_state_seconds: float = Field(default=30.0, ge=25.0, le=60.0)
+    container_stats_seconds: float = Field(default=60.0, ge=25.0, le=60.0)
+    stack_changes_seconds: float = Field(default=60.0, ge=25.0, le=60.0)
+    queue_seconds: float = Field(default=30.0, ge=25.0, le=60.0)
     reconciliation_seconds: float = Field(default=3600.0, gt=0)
     digest_hour: int = Field(default=9, ge=0, le=23)
     health_seconds: float = Field(default=30.0, gt=0)

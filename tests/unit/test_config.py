@@ -102,11 +102,27 @@ class TestConfigReal:
         }
         assert ".env" in entradas
 
-    def test_cadencia_de_workflow_respeita_o_custo_medido(self) -> None:
-        """ADR D6: 11,2 MB por pagina. A 60 s seriam ~16 GB/dia. Piso de 1 min
-        (decisao do dono: edicao de workflow precisa chegar rapido); abaixo
-        disso o poll do corpo completo estoura a banda do n8n."""
-        assert load().polling.workflow_full_seconds >= 60
+    def test_todo_ciclo_de_coleta_e_disparo_fica_entre_25s_e_1min(self) -> None:
+        """Decisao do dono: coleta e disparo entre 25 s e 1 min. O piso protege as fontes
+        (o diff de workflows le 11,2 MB por ciclo); o teto garante o alerta rapido."""
+        p = load().polling
+        ciclos = {
+            "erros": p.execution_errors_seconds, "workflows": p.workflow_full_seconds,
+            "containers": p.container_state_seconds, "consumo": p.container_stats_seconds,
+            "stacks": p.stack_changes_seconds, "fila": p.queue_seconds,
+        }
+        fora = {nome: valor for nome, valor in ciclos.items() if not 25 <= valor <= 60}
+        assert not fora, f"fora de 25-60 s: {fora}"
+
+    @pytest.mark.parametrize("campo", ["execution_errors_seconds", "workflow_full_seconds", "queue_seconds"])
+    @pytest.mark.parametrize("valor", [10, 24, 61, 300])
+    def test_intervalo_fora_de_25_a_60_s_e_recusado_no_boot(self, campo: str, valor: int) -> None:
+        from pydantic import ValidationError
+
+        from agent_nio_monitor.config.schema import PollingConfig
+
+        with pytest.raises(ValidationError):
+            PollingConfig(**{campo: valor})
 
     def test_ambiente_inexistente_e_rejeitado(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Config invalida tem que falhar no boot. Falhar em producao as 3h da

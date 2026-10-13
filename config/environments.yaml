@@ -25,11 +25,12 @@ active_environment: production
 # aceito pelo dono para a edicao de workflow chegar em ate 1 min. O snapshot so e
 # gravado quando ha mudanca, entao o banco nao cresce com isso.
 polling:
-  execution_errors_seconds: 60
-  workflow_active_seconds: 300
-  workflow_full_seconds: 60
-  container_state_seconds: 60
-  container_stats_seconds: 300
+  execution_errors_seconds: 30
+  workflow_full_seconds: 60      # diff completo + ativacao/desativacao (uma leitura so)
+  container_state_seconds: 30
+  container_stats_seconds: 60
+  stack_changes_seconds: 60
+  queue_seconds: 30              # fila de disparo: reconfere e envia
   reconciliation_seconds: 3600
   digest_hour: 9
   health_seconds: 30

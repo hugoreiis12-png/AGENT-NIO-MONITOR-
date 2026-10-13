@@ -34,6 +34,7 @@ class HealthState:
     collect_errors: dict[str, int] = field(default_factory=dict)
     n8n_up: bool | None = None
     gaps_detected: int = 0
+    queue: dict[str, Any] = field(default_factory=dict)
 
     def mark(self, source: str, ok: bool) -> None:
         if ok:
@@ -57,6 +58,7 @@ class HealthState:
             "collect_errors": dict(self.collect_errors),
             "stale_sources": self.stale_sources(max_stale),
             "gaps_detected": self.gaps_detected,
+            "queue": dict(self.queue),
         }
 
 

@@ -29,36 +29,55 @@ def _wf(wid: str, active: bool, **extra) -> dict:
 
 
 class TestToggleDeEstado:
+    """Ativar/desativar sai do mesmo diff completo (uma leitura so por ciclo)."""
+
     @respx.mock
-    async def test_primeira_passada_so_povoa_cache(self) -> None:
+    async def test_primeira_passada_nao_gera_evento_de_ativacao(self) -> None:
         """Sem isso, todo workflow existente pareceria 'acabou de ativar' no
         boot do agente -- falso positivo em massa a cada restart."""
         _mock_workflows([_wf("1", True), _wf("2", False)])
         mon = WorkflowMonitor(N8NClient(N8N, "k", verify_ssl=False), InMemoryRepository())
-        resultado = await mon.check_active_state()
-        assert resultado.collected == 0
+        resultado = await mon.check_structural_diff()
+        assert resultado.extra["eventos"] == []
 
     @respx.mock
-    async def test_segunda_passada_detecta_ativacao(self) -> None:
+    async def test_ativacao_vira_evento_proprio_sem_duplicar_no_changed(self) -> None:
         mon = WorkflowMonitor(N8NClient(N8N, "k", verify_ssl=False), InMemoryRepository())
         _mock_workflows([_wf("1", False)])
-        await mon.check_active_state()
+        await mon.check_structural_diff()
 
         _mock_workflows([_wf("1", True)])
-        resultado = await mon.check_active_state()
-        eventos = resultado.extra["eventos"]
-        assert len(eventos) == 1
-        assert eventos[0].event_type == "workflow_activated"
+        eventos = (await mon.check_structural_diff()).extra["eventos"]
+        assert [e.event_type for e in eventos] == ["workflow_activated"]
         assert eventos[0].resource_id == "1"
+        assert eventos[0].detail["ativo"] is True
+
+    @respx.mock
+    async def test_desativacao_registra_o_novo_estado(self) -> None:
+        mon = WorkflowMonitor(N8NClient(N8N, "k", verify_ssl=False), InMemoryRepository())
+        _mock_workflows([_wf("1", True)])
+        await mon.check_structural_diff()
+        _mock_workflows([_wf("1", False)])
+        eventos = (await mon.check_structural_diff()).extra["eventos"]
+        assert [e.event_type for e in eventos] == ["workflow_deactivated"]
+        assert eventos[0].detail["ativo"] is False
+
+    @respx.mock
+    async def test_ativar_e_editar_ao_mesmo_tempo_gera_dois_eventos(self) -> None:
+        mon = WorkflowMonitor(N8NClient(N8N, "k", verify_ssl=False), InMemoryRepository())
+        _mock_workflows([_wf("1", False, nodes=[{"id": "a", "name": "A", "type": "t"}])])
+        await mon.check_structural_diff()
+        _mock_workflows([_wf("1", True, nodes=[{"id": "a", "name": "A", "type": "t"},
+                                                 {"id": "b", "name": "B", "type": "t"}])])
+        eventos = (await mon.check_structural_diff()).extra["eventos"]
+        assert sorted(e.event_type for e in eventos) == ["workflow_activated", "workflow_changed"]
 
     @respx.mock
     async def test_sem_mudanca_nao_gera_evento(self) -> None:
         mon = WorkflowMonitor(N8NClient(N8N, "k", verify_ssl=False), InMemoryRepository())
         _mock_workflows([_wf("1", True)])
-        await mon.check_active_state()
-
-        resultado = await mon.check_active_state()
-        assert resultado.collected == 0
+        await mon.check_structural_diff()
+        assert (await mon.check_structural_diff()).extra["eventos"] == []
 
 
 class TestDiffEstrutural:

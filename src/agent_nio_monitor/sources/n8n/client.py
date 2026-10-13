@@ -225,6 +225,14 @@ class N8NClient:
     async def list_credentials(self) -> list[dict[str, Any]]:
         return list((await self._get("/api/v1/credentials")).get("data", []))
 
+    async def last_execution(self, workflow_id: str) -> dict[str, Any] | None:
+        """Execucao mais recente do workflow, de qualquer status (sem o payload)."""
+        pagina = await self._get(
+            "/api/v1/executions", {"workflowId": workflow_id, "limit": 1, "includeData": "false"}
+        )
+        dados = pagina.get("data") or []
+        return dados[0] if dados else None
+
     async def get_execution(self, execution_id: int | str, include_data: bool = True) -> dict:
         return await self._get(
             f"/api/v1/executions/{execution_id}",

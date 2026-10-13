@@ -33,6 +33,7 @@ class ResourceCollector:
         self.cpu_limite, self.mem_limite, self.sustentacao = cpu_host_pct, mem_pct, sustained_samples
         self._cpu_anterior: dict[str, tuple[int, int]] = {}
         self._altas: dict[str, int] = {}
+        self.ultima_amostra: dict[str, tuple[float | None, float | None]] = {}
 
     async def check_resources(self) -> CollectorResult:
         try:
@@ -85,6 +86,7 @@ class ResourceCollector:
     ) -> EventRecord | None:
         container = parse_container(row)
         container_id = container["container_id"]
+        self.ultima_amostra[container_id] = (cpu, mem)
         self.repo.record_container_observation(
             container_id, now_utc(), state=container["state"], health=container["health"], mem_pct=mem, cpu_pct=cpu,
         )

@@ -37,6 +37,17 @@ class ContainerCollector:
         self.repo = repo
         self.tracker = LifecycleTracker(loop_count=loop_count, loop_window=timedelta(minutes=loop_window_minutes))
         self._inspects_restantes = MAX_INSPECT_POR_CICLO
+        self._atuais: dict[str, dict] = {}
+        self._nomes: dict[int, set[str]] = {}
+
+    def estado_atual(self, container_id: str) -> dict | None:
+        """Container como visto no ULTIMO ciclo (None se nao apareceu): a fila usa para
+        saber se o problema ja passou, sem chamar a API de novo."""
+        return self._atuais.get(container_id)
+
+    def nome_presente(self, endpoint_id: int, nome: str) -> bool | None:
+        nomes = self._nomes.get(endpoint_id)
+        return None if nomes is None else nome in nomes
 
     async def check_state(self) -> CollectorResult:
         try:
@@ -47,6 +58,7 @@ class ContainerCollector:
 
         stacks = await stacks_por_nome(self.client)
         self._inspects_restantes = MAX_INSPECT_POR_CICLO
+        self._atuais = {}
         eventos: list[EventRecord] = []
         total = 0
         for endpoint in endpoints:
@@ -66,6 +78,7 @@ class ContainerCollector:
         for row in rows:
             eventos.extend(await self._processar_container(endpoint_id, row, stacks))
         atuais = {parse_container(r)["name"]: {"stack": stack_do_container(r)} for r in rows}
+        self._nomes[endpoint_id] = set(atuais)
         for nome, info in self.tracker.removidos(endpoint_id, atuais):
             removido = self._evento_removido(nome, dono_da_stack(info["stack"], stacks))
             removido.detail["endpoint_id"] = endpoint_id
@@ -75,6 +88,7 @@ class ContainerCollector:
     async def _processar_container(self, endpoint_id: int, row: dict, stacks: dict[str, dict]) -> list[EventRecord]:
         container = parse_container(row)
         container_id, nome = container["container_id"], container["name"]
+        self._atuais[container_id] = {**container, "recente": eh_candidato_a_loop(row)}
         dono = dono_da_stack(stack_do_container(row), stacks)
         eventos = self._transicoes(container, self.repo.last_container_observation(container_id), dono)
         reinicios = await self._contagem_de_reinicios(endpoint_id, row, container_id)

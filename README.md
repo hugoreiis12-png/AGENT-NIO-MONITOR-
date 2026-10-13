@@ -94,6 +94,23 @@ $env:SKIP_LLM_TESTS="1"; .\.\.venv\Scripts\python.exe -m pytest -q   # sem LLM
 
 ---
 
+## Notificações: fila, e-mail HTML e tempos
+
+- **Fila interna de disparo** (`notification_queue`, migration 004). Nada sai na hora: o evento
+  entra na fila e espera 1 ciclo da fonte. Na reconferência (`notify/resolution.py`), se o
+  problema passou (container voltou, execução posterior com sucesso, consumo normalizou...) o
+  alerta é **descartado**; se continua, sai **uma vez só** (um pendente por problema, e a mesma
+  chave não repete dentro da janela de re-notificação da regra). Falha de envio reagenda
+  (30/60/120/240 s) e desiste após 5 tentativas. Fatos (workflow/stack alterados) não têm o que
+  resolver e saem no primeiro ciclo. `/healthz` mostra `queue.pending`.
+- **Tempos:** todo ciclo entre 25 e 60 s (erros e containers 30 s; workflows, stacks e consumo
+  60 s; fila 30 s). Valores fora disso são recusados no boot (`PollingConfig`).
+- **E-mail HTML com a arte JFC:** `notify/html/` (vermelho = CRÍTICO/ALTO, amarelo = MÉDIO,
+  verde = BAIXO/INFO). As imagens ficam em `assets/email/`, geradas por
+  `scripts/recortar_arte.py` a partir do tríptico em `assets/`, e servidas pelo GitHub
+  (`mail.assets_base_url`). Horários em Brasília. O texto simples segue como alternativa.
+- O workflow do n8n (`n8n/workflow_envio_email.json`) envia `emailFormat: both` (HTML + texto).
+
 ## Verificações que sustentam o desenho
 
 Estes testes usam **dados reais** da sua instância, não inventados:

@@ -67,6 +67,7 @@ Agende `drop_partitions_older_than` mensalmente. `DROP PARTITION` é instantâne
 | Sintoma | Onde olhar |
 |---|---|
 | Nenhum email chega | `SELECT status, recipients, error FROM hermes.notification ORDER BY ts DESC LIMIT 20;` |
+| Alerta não saiu / saiu atrasado | `SELECT status, event_type, resolved_reason, last_error FROM hermes.notification_queue ORDER BY created_at DESC LIMIT 20;` — `discarded` com motivo = o problema passou antes do envio; `pending` parado = veja `/healthz` → `queue` |
 | Destinatário errado | log `destinatario_por_fallback` — mostra `fonte` e `motivo` |
 | Eventos sumindo | `SELECT * FROM hermes.reconciliation_run ORDER BY run_at DESC LIMIT 20;` — `gaps > 0` ou `cursor_valid = false` |
 | Erro de coleta | `SELECT * FROM hermes.source_cursor;` — `consecutive_failures` |

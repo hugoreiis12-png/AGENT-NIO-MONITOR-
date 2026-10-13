@@ -1,9 +1,8 @@
 """Liga o diff estrutural (T5) ao pipeline de evento.
 
-Dois ciclos, cadencias diferentes (ADR D6, ver `workflow_active_seconds` vs
-`workflow_full_seconds`): o toggle de `active` e barato e serve de alerta
-rapido; o diff estrutural completo exige o snapshot anterior e so roda no
-ciclo lento, onde o custo da pagina de 11,2 MB ja seria pago mesmo assim.
+Um ciclo so: a lista completa de workflows (11,2 MB) e lida uma vez por ciclo e dela
+saem tudo -- workflow criado, ativado/desativado e alterado. Antes havia um ciclo
+"rapido" de ativacao que lia os mesmos 11,2 MB e se sobrepunha ao diff.
 """
 
 from __future__ import annotations
@@ -20,63 +19,21 @@ from .diff import autoria_de, diff_workflows, resumo, risco_para_score
 log = structlog.get_logger(__name__)
 
 
+def _eh_toggle(mudanca: Change) -> bool:
+    return mudanca.kind == "settings_changed" and mudanca.path == "active"
+
+
 class WorkflowMonitor:
     source = "n8n"
 
     def __init__(self, client: N8NClient, repo: Repository) -> None:
         self.client = client
         self.repo = repo
-        # Cache em memoria do ultimo `active` visto, por workflow_id. So serve
-        # para o toggle RAPIDO (300s); o diff estrutural (900s) nao depende
-        # disto -- a fonte de verdade dele e o snapshot persistido.
-        self._active_cache: dict[str, bool] | None = None
-
-    async def check_active_state(self, *, name_by_id: dict[str, str] | None = None) -> CollectorResult:
-        """Ciclo rapido: so compara `active`. Primeira passada so povoa o cache
-        -- sem isso, todo workflow existente pareceria "acabou de ativar" no
-        boot do agente."""
-        nomes = name_by_id or {}
-        eventos: list[EventRecord] = []
-        vistos: dict[str, bool] = {}
-        primeira_passada = self._active_cache is None
-        cache_anterior = self._active_cache or {}
-
-        try:
-            async for wf in self.client.iter_workflows():
-                wid = str(wf.get("id"))
-                ativo = bool(wf.get("active", False))
-                vistos[wid] = ativo
-                if primeira_passada:
-                    continue
-                anterior = cache_anterior.get(wid)
-                if anterior is not None and anterior != ativo:
-                    eventos.append(
-                        self._evento_toggle(wid, nomes.get(wid, wid), ativo)
-                    )
-        except N8NApiError as exc:
-            log.error("checagem_de_estado_de_workflow_falhou", erro=str(exc))
-            return CollectorResult(error=str(exc))
-
-        self._active_cache = vistos
-        return CollectorResult(collected=len(eventos), extra={"eventos": eventos})
-
-    def _evento_toggle(self, workflow_id: str, nome: str, ativo: bool) -> EventRecord:
-        tipo = "workflow_activated" if ativo else "workflow_deactivated"
-        return EventRecord(
-            id=new_event_id(),
-            ts=now_utc(),
-            source=self.source,
-            event_type=tipo,
-            severity="low",
-            title=f"{nome} foi {'ativado' if ativo else 'desativado'}",
-            resource_id=workflow_id,
-            detail={"workflow_id": workflow_id, "workflow_nome": nome, "recurso": nome},
-        )
 
     async def check_structural_diff(
         self, *, name_by_id: dict[str, str] | None = None
     ) -> CollectorResult:
-        """Ciclo lento: body completo, projecao, diff contra o ultimo snapshot.
+        """Body completo, projecao, diff contra o ultimo snapshot.
 
         So grava snapshot novo quando o workflow e novo ou o diff achou mudanca: assim
         o `before` do ciclo seguinte e sempre o ultimo estado ja relatado, sem
@@ -86,9 +43,7 @@ class WorkflowMonitor:
         baseline = self.repo.has_workflow_snapshots()
         try:
             async for wf in self.client.iter_workflows():
-                evento = self._processar_workflow(wf, nomes, baseline)
-                if evento is not None:
-                    eventos.append(evento)
+                eventos.extend(self._processar_workflow(wf, nomes, baseline))
         except N8NApiError as exc:
             log.error("diff_estrutural_falhou", erro=str(exc))
             return CollectorResult(error=str(exc))
@@ -97,7 +52,7 @@ class WorkflowMonitor:
 
     def _processar_workflow(
         self, workflow: dict[str, Any], nomes: dict[str, str], baseline: bool
-    ) -> EventRecord | None:
+    ) -> list[EventRecord]:
         workflow_id = str(workflow.get("id"))
         nome = str(workflow.get("name") or nomes.get(workflow_id) or workflow_id)
         ativo = bool(workflow.get("active", False))
@@ -112,13 +67,37 @@ class WorkflowMonitor:
         if anterior is None:
             self.repo.save_workflow_snapshot(workflow_id, version_id, ativo, workflow)
             # Sem linha de base global e a primeira coleta; com ela, e workflow NOVO.
-            return self._evento_criado(workflow, workflow_id, nome) if baseline else None
+            return [self._evento_criado(workflow, workflow_id, nome)] if baseline else []
 
         mudancas: list[Change] = diff_workflows(anterior["body"], workflow)
         if not mudancas:
-            return None  # snapshot equivalente ao atual: gravar de novo so incharia o banco
+            return []  # snapshot equivalente ao atual: gravar de novo so incharia o banco
         self.repo.save_workflow_snapshot(workflow_id, version_id, ativo, workflow)
 
+        eventos = []
+        if any(_eh_toggle(m) for m in mudancas):
+            eventos.append(self._evento_toggle(workflow_id, nome, ativo, autoria_de(workflow)))
+        estruturais = [m for m in mudancas if not _eh_toggle(m)]
+        if estruturais:
+            eventos.append(self._evento_alterado(workflow, workflow_id, nome, estruturais))
+        return eventos
+
+    def _evento_toggle(self, workflow_id: str, nome: str, ativo: bool, autor: str | None) -> EventRecord:
+        tipo = "workflow_activated" if ativo else "workflow_deactivated"
+        return EventRecord(
+            id=new_event_id(),
+            ts=now_utc(),
+            source=self.source,
+            event_type=tipo,
+            severity="low",
+            title=f"{nome} foi {'ativado' if ativo else 'desativado'}",
+            resource_id=workflow_id,
+            detail={"workflow_id": workflow_id, "workflow_nome": nome, "recurso": nome, "ativo": ativo, "autor": autor},
+        )
+
+    def _evento_alterado(
+        self, workflow: dict[str, Any], workflow_id: str, nome: str, mudancas: list[Change]
+    ) -> EventRecord:
         pontos, fatores = risco_para_score(mudancas)
         return EventRecord(
             id=new_event_id(),
