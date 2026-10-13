@@ -1,6 +1,6 @@
 """Carrega o `.env` para os testes de integracao.
 
-Sem isso, `DATABASE_DSN` precisa ser exportado na mao antes de rodar pytest, e
+Sem isso, `DATABASE_DSN_TEST` precisa ser exportado na mao antes de rodar pytest, e
 `pytest` simplesmente pula os 28 testes de Postgres sem avisar que faltava
 configuracao -- o pior modo de falha: parece que passou.
 

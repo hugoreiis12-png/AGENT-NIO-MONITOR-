@@ -1,6 +1,6 @@
 """Testes contra Postgres REAL.
 
-Pulam sozinhos se `DATABASE_DSN` nao estiver definido. Rodar e o unico jeito de
+Pulam sozinhos se `DATABASE_DSN_TEST` nao estiver definido. Rodar e o unico jeito de
 verificar o que `pglast` nao pega: FK entre tabela particionada, colisao de nome
 de particao, COPY em tabela particionada, e a redacao na fronteira de escrita.
 
@@ -9,13 +9,14 @@ Este arquivo e o que fecha a lacuna declarada no README.
 
 from __future__ import annotations
 
-import os
 import uuid
 from datetime import UTC, datetime
 
 import pytest
 
-DSN = os.environ.get("DATABASE_DSN")
+from .dsn_teste import dsn_de_teste
+
+DSN = dsn_de_teste()
 pytestmark = pytest.mark.integration
 
 pytest.importorskip("psycopg")
@@ -25,7 +26,7 @@ pytest.importorskip("psycopg_pool")
 @pytest.fixture(scope="module")
 def db():  # noqa: ANN201
     if not DSN:
-        pytest.skip("DATABASE_DSN nao definido: pulei (leia o README, secao 'O que NAO esta verificado')")
+        pytest.skip("DATABASE_DSN_TEST ausente ou inseguro (precisa ser base *_test e diferente do agente)")
     from agent_nio_monitor.store.db import Database
 
     d = Database(DSN, "hermes", 1, 4)

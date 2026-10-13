@@ -11,15 +11,16 @@ Enquanto este teste nao rodar, mock e producao podem divergir em silencio de
 novo. E por isso que ele compara as DUAS implementacoes com a MESMA entrada, em
 vez de afirmar a semantica duas vezes em lugares diferentes.
 
-Pula sem `DATABASE_DSN`. Sem isso ele nao roda -- e nao finge que rodou.
+Pula sem `DATABASE_DSN_TEST`. Sem isso ele nao roda -- e nao finge que rodou.
 """
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime, timedelta
 
 import pytest
+
+from .dsn_teste import dsn_de_teste
 
 from agent_nio_monitor.store.repository import (
     ExecutionRecord,
@@ -30,7 +31,7 @@ from agent_nio_monitor.store.repository import (
 pytest.importorskip("psycopg")
 pytest.importorskip("psycopg_pool")
 
-DSN = os.environ.get("DATABASE_DSN")
+DSN = dsn_de_teste()
 BASE = datetime(2026, 10, 12, 16, 30, tzinfo=UTC)
 
 
@@ -39,11 +40,7 @@ def pg_repo():
     """Postgres de teste. Apaga TUDO antes de comecar -- `hermes_test` e
     descartavel por definicao, nunca `hermes`."""
     if not DSN:
-        pytest.skip("DATABASE_DSN nao definido")
-    if "test" not in DSN:
-        pytest.skip(
-            "DATABASE_DSN nao parece ser base de teste -- recusando por seguranca"
-        )
+        pytest.skip("DATABASE_DSN_TEST ausente ou inseguro (precisa ser base *_test e diferente do agente)")
     from agent_nio_monitor.store.db import Database
     from agent_nio_monitor.store.postgres_repository import PostgresRepository
 
