@@ -22,6 +22,7 @@ from .notify.templates import formatar_horas, render
 from .rules.engine import RuleEngine
 from .sources.n8n.client import N8NClient
 from .sources.n8n.collector import ExecutionErrorCollector
+from .sources.n8n.workflow_index import WorkflowIndex
 from .sources.n8n.workflow_monitor import WorkflowMonitor
 from .sources.portainer.client import PortainerClient
 from .sources.portainer.collector import ContainerCollector
@@ -63,6 +64,7 @@ class Agent:
             max_recipients=self.policy.max_recipients,
         )
         self.n8n = self.resolver.client
+        self.index = WorkflowIndex(self.n8n)
         self.workflow_monitor = WorkflowMonitor(self.n8n, self.repo)
         self.containers = _build_container_collector(cfg, self.repo)
 
@@ -70,8 +72,8 @@ class Agent:
 
     async def collect_execution_errors(self) -> list[EventRecord]:
         collector = ExecutionErrorCollector(self.n8n, self.repo)
-        nomes = await self._workflow_names()
-        resultado = await collector.run(name_by_id=nomes)
+        await self.index.load()
+        resultado = await collector.run(name_by_id=self.index.names)
         self.health.mark("n8n_executions", resultado.ok)
         if resultado.gap:
             self.health.gaps_detected += 1
@@ -99,7 +101,7 @@ class Agent:
                     event_type="execution_failed",
                     severity=decisao.severity,
                     title=f"{nome} falhou {streak.count}x",
-                    tenant_id=getattr(streak, "tenant_id", None),
+                    tenant_id=self.index.projects.get(workflow_id),
                     resource_id=workflow_id,
                     streak_count=streak.count,
                     detail={
@@ -116,18 +118,6 @@ class Agent:
                 )
             )
         return eventos
-
-    async def _workflow_names(self) -> dict[str, str]:
-        cache = getattr(self, "_names_cache", None)
-        if cache is None:
-            nomes: dict[str, str] = {}
-            try:
-                async for wf in self.n8n.iter_workflows():
-                    nomes[str(wf.get("id"))] = str(wf.get("name") or wf.get("id"))
-            except Exception as exc:  # noqa: BLE001 - nome e opcional, coleta nao pode morrer por isso
-                log.warning("nomes_de_workflow_indisponiveis", erro=str(exc))
-            self._names_cache = nomes
-        return self._names_cache
 
     # -------------------------------------------------------- pipeline de alerta
 
@@ -174,7 +164,7 @@ class Agent:
         self.repo.save_notification(
             event_id=evento.id,
             channel=resultado.channel,
-            recipients=resultado.emails,
+            recipients=resultado.recipients,
             subject=assunto,
             body=corpo,
             status=resultado.status,
@@ -214,21 +204,22 @@ class Agent:
         aqui centralizada porque workflow/container nao tem streak proprio."""
         decisao = self.rules.evaluate(event_type=evento.event_type, now=evento.ts)
         evento.severity = decisao.severity
+        evento.tenant_id = evento.tenant_id or self.index.projects.get(evento.resource_id or "")
         evento.detail["notificar"] = decisao.notify
         evento.detail["motivo_supressao"] = decisao.suppress_reason
         evento.detail["template"] = decisao.template
         return evento
 
     async def check_workflows_active(self) -> int:
-        nomes = await self._workflow_names()
-        resultado = await self.workflow_monitor.check_active_state(name_by_id=nomes)
+        await self.index.load()
+        resultado = await self.workflow_monitor.check_active_state(name_by_id=self.index.names)
         self.health.mark("n8n_workflows_state", resultado.ok)
         eventos = [self._decidir(e) for e in resultado.extra.get("eventos", [])]
         return await self.process_events(eventos)
 
     async def check_workflows_full(self) -> int:
-        nomes = await self._workflow_names()
-        resultado = await self.workflow_monitor.check_structural_diff(name_by_id=nomes)
+        await self.index.load()
+        resultado = await self.workflow_monitor.check_structural_diff(name_by_id=self.index.names)
         self.health.mark("n8n_workflows_full", resultado.ok)
         eventos = [self._decidir(e) for e in resultado.extra.get("eventos", [])]
         return await self.process_events(eventos)
