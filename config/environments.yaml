@@ -1,0 +1,55 @@
+# URLs e nomes de variavel de ambiente. SEGREDO NAO FICA AQUI -- so o nome da env.
+
+environments:
+  production:
+    n8n:
+      # Verificado por sonda TCP + HTTP: 192.168.0.140:5678 esta FECHADO.
+      # O n8n responde em 192.168.0.160:5678 (/healthz -> 200).
+      url: "http://192.168.0.160:5678"
+      api_key_env: "N8N_API_KEY"
+      verify_ssl: false
+      timeout_seconds: 30
+    portainer:
+      # Verificado: o mesmo token devolve 401 em .140 e 200 em .160.
+      # Ha mais de um Portainer na rede; este e o que responde.
+      url: "https://192.168.0.160:9443"
+      api_key_env: "PORTAINER_API_KEY"
+      verify_ssl: false
+      timeout_seconds: 30
+
+active_environment: production
+
+# Cadencias distintas porque o custo e assimetrico (ADR D6).
+# Medido na instancia real: GET /api/v1/workflows = 11,2 MB por pagina.
+# A 60 s seriam 16 GB/dia so para descobrir que nada mudou.
+polling:
+  execution_errors_seconds: 60
+  workflow_active_seconds: 300
+  workflow_full_seconds: 900
+  container_state_seconds: 60
+  container_stats_seconds: 300
+  reconciliation_seconds: 3600
+  digest_hour: 9
+  health_seconds: 30
+
+# Canal normal: webhook do n8n (mesmo host da instancia monitorada).
+# Canal de n8n morto: log no terminal (decisao do dono do projeto).
+mail:
+  webhook_url: "http://192.168.0.160:5678"
+  webhook_path: "/webhook/agent-nio-monitor"
+
+# O LLM REDIGE o texto do alerta. Nao decide severidade nem destinatario.
+llm:
+  base_url: "http://192.168.0.140:11434"
+  model: "hermes3:8b"
+  num_ctx: 8192
+  temperature: 0.2
+  max_tokens: 400
+  fallback_to_template: true
+
+# Schema separado. NUNCA o mesmo database do n8n.
+database:
+  dsn: "${DATABASE_DSN}"
+  schema: "hermes"
+  pool_min: 1
+  pool_max: 8

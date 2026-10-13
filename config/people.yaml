@@ -1,0 +1,27 @@
+# Fallback de destinatarios por n8n projectId.
+#
+# Porque existe: `/api/v1/users` e `/api/v1/projects/{id}/users` exigem API key
+# de owner/admin. Se a sua key nao for, o agente CAE aqui. E o fallback tem que
+# ser declarado, porque "ninguem notificado" e o modo de falha que faz um
+# monitor virar mobilia.
+#
+# projectIds observados na sua instancia:
+#   3imXOO5ZxENBY78E
+#   V3yqT1MGvf0Ufg17
+#   wGiMpmFFLBhiwtFm
+#
+# Troque os e-mails pelos responsaveis reais de cada projeto.
+
+projects:
+  3imXOO5ZxENBY78E:
+    - rafael.barboza@grupocampanha.com.br
+  V3yqT1MGvf0Ufg17:
+    - carlos.henrique@grupocampanha.com.br
+  wGiMpmFFLBhiwtFm:
+    - hugo.reis@grupocampanha.com.br
+  
+
+# Se o projectId nao estiver no mapa acima e nem na API, quem recebe.
+# Deixar VAZIO e melhor do que errar: o agente registra 'sem destinatario'
+# e isso aparece no log com evidencia, em vez de mandar alerta para o lugar errado.
+global: []

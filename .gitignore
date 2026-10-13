@@ -1,0 +1,28 @@
+# Segredo. NUNCA comitar.
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Dados locais e saida
+data/
+logs/
+*.sqlite
+*.jsonl
+
+# Editores
+.vscode/
+.idea/
+.ruff_cache/
+.coverage
+htmlcov/

@@ -1,0 +1,138 @@
+# AGENT NIO MONITOR
+
+Agente que observa **n8n** e **Portainer CE**, detecta falha e mudança, e notifica
+o responsável certo.
+
+## O que ele resolve
+
+| Antes | Depois |
+|---|---|
+| Evento passa despercebido | Monitoramento contínuo |
+| Erro só aparece quando explode | Detecção na primeira execução com erro |
+| Ninguém sabe quem é o responsável | Destinatário resolvido por n8n project / Portainer ResourceControl |
+| Impacto de mudança não avaliado | Diff estrutural + análise de risco determinística |
+| Comunicação manual | Email automático, **detalhado porém direto** |
+
+## Status atual
+
+**476 testes passando**, lint limpo, cobertura de 72%.
+
+| Ticket | Entrega | Estado |
+|---|---|---|
+| T1 | Feature-detect, config, schema Postgres, migrations versionadas | OK |
+| T2 | Coleta por cursor + detector de buraco + redator | OK |
+| T3 | Streak + motor de regras + destinatarios | OK |
+| T4 | LLM redige + templates de email | OK |
+| T5 | Diff estrutural de workflow (funcao) | FALTA ligar na agenda |
+| T6 | Cliente Portainer (funcao) | FALTA ligar na agenda |
+| T7 | HealthServer + dead-man's switch (funcao) | FALTA instalar o cron |
+
+### Bugs achados e corrigidos na auditoria
+
+A auditoria de refino encontrou defeitos em codigo que eu havia declarado pronto:
+
+| Severidade | Defeito | Como foi pego |
+|---|---|---|
+| Critico | `record_executions` usava `COPY` com `columns=` (inexistente no psycopg3), nao alimentava as linhas e nao tinha `ON CONFLICT` | Inspecao da assinatura real de `Cursor.copy` |
+| Critico | `bump_streak` da InMemory zerava o contador; a regra `min_streak: 3` **nunca** chegava a `critical` | Teste com horario CRESCENTE (o caso real de um workflow que comeca a falhar) |
+| Critico | `Streak` sem `tenant_id`/`workflow_name`; o Postgres devolvia objeto sem eles | Leitura do dataclass contra o `RETURNING` |
+| Alto | 503 do gateway nao era retentado | Teste de politica de retry |
+| Alto | `duration_ms` negativo (-3600000 ms) com clock skew | Teste de borda |
+| Alto | `add_signal_handler` derrubava o boot no Windows | Execucao direta: `NotImplementedError` |
+| Alto | 18 arquivos com BOM, que quebra `ast.parse` e `pglast` | `ast.parse` falhando no script de limpeza |
+| Medio | `senha` (portugues) nao era redigida | Teste de borda com chave pt-BR |
+| Medio | `formatar_horas` mostrava UTC sem rotulo num servidor em UTC-3 — 6 h de erro | Teste de borda de fuso |
+| Medio | Bootstrap SQL dentro de `migrations/` — o agente tentaria `CREATE ROLE` no boot | Teste de fronteira |
+
+### O anti-padrão que Enabling e que estes testes fecham
+
+`InMemoryRepository` e `PostgresRepository` divergiam, e os testes rodavam so
+contra a InMemory. Um mock que mente e pior que nenhum mock: o teste passa,
+a producao falha. `tests/integration/test_paridade_postgres.py` agora executa as
+DUAS implementacoes com a MESMA entrada e compara resultado. Enquanto ele nao
+rodar, mock e producao podem divergir de novo.
+
+---
+
+## Como rodar
+
+```powershell
+uv venv --python 3.12
+uv pip install -e ".[dev]"
+Copy-Item .env.example .env      # preencha
+```
+
+### 1. Descobrir o que a instância expõe
+
+```powershell
+.\.venv\Scripts\python.exe -m agent_nio_monitor.main doctor
+```
+
+Sonda endpoints e imprime a **versão real do n8n** (vem de `/healthz`, não de
+suposição). Essa é a resposta para a pergunta que ficou aberta no planejamento.
+
+### 2. Uma passada de coleta
+
+```powershell
+.\.venv\Scripts\python.exe -m agent_nio_monitor.main once
+```
+
+### 3. Loop contínuo
+
+```powershell
+.\.venv\Scripts\python.exe -m agent_nio_monitor.main run
+# health em http://localhost:8099/healthz
+```
+
+### Testes
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q                      # tudo
+$env:SKIP_LLM_TESTS="1"; .\.\.venv\Scripts\python.exe -m pytest -q   # sem LLM
+.\.venv\Scripts\python.exe -m ruff check src tests --select F,E9,B,SIM,UP
+```
+
+---
+
+## Verificações que sustentam o desenho
+
+Estes testes usam **dados reais** da sua instância, não inventados:
+
+- **Redação**: os dois segredos que existem no seu `GET /workflows`
+  (`Password: jfc2025` do SAP, `user=postgres password=postgres` do `dblink`).
+- **Política**: as 25 execuções com erro mais recentes, com os horários reais.
+- **Coleta**: o cursor invalidados pelo prune, e o caso de 400 em vez de 404.
+- **LLM**: `hermes3:8b` real em `192.168.0.140:11434`.
+
+---
+
+## O que Não está verificado
+
+**O banco real.** Docker não está disponível nesta máquina, então o DDL foi
+validado com `pglast` (parser do próprio PostgreSQL) — pega erro de sintaxe,
+tipo inválido, índice sobre coluna inexistente. **Não** pega FK entre tabela
+particionada, colisão de nome de partição, nem comportamento em volume.
+
+Antes de subir, rode uma vez com Postgres de verdade:
+
+```powershell
+$env:DATABASE_DSN="postgresql://usuario:senha@host:5432/hermes"
+.\.venv\Scripts\python.exe -m agent_nio_monitor.main doctor
+```
+
+`store/postgres_repository.py` e `store/db.py` têm **0% de cobertura** porque
+dependem de banco. Antes do primeiro deploy, rode `tests/integration/test_postgres_live.py`
+(ele pula sozinho se não houver DSN).
+
+---
+
+## Riscos abertos
+
+| Risco | Situação |
+|---|---|
+| **Silêncio** | Se o n8n cai, o alerta vai para log (decisão do dono). **Precisa de consumidor** — ver `docs/runbook.md` |
+| **Atribuição** | `activeVersion.authors` existe na sua instância e é lido. Se o `doctor` mostrar `versioning: nao`, a autoria volta a ser indisponível |
+| **Bandwidth** | Poll de corpo completo a 15 min ≈ 1 GB/dia em LAN. Se passar a 5 min, o alerta de banda entra sozinho |
+| **Fadiga** | Política entrega ~11 emails para 25 erros em 25h (piso de 8: um por workflow quebrado). Monitorar taxa de falso positivo |
+
+Ver `docs/runbook.md` para operação e `docs/adr/` para o porquê de cada decisão.

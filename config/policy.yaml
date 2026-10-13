@@ -1,0 +1,101 @@
+# Motor de regras UNICO.
+#
+# O doc original tinha DUAS fontes de verdade para "o que e risco":
+# notification_rules.yaml (config) E um RiskAnalyzer hardcoded com `score += 4`.
+# Config que discorda do codigo e como a config passa a mentir em silencio.
+# Aqui existe so este arquivo.
+
+aggregation:
+  # Medido na instancia real: 25 erros em 25h35, 8 workflows distintos, com os 3
+  # maiores = 76% deles.
+  #
+  # Deduplicar NAO e o que limita o volume aqui. O que limita e quantos workflows
+  # DISTINTOS estao quebrados -- 8. Cada um precisa de pelo menos 1 alerta, senao
+  # o monitor deixa de detectar. O piso e 8, nao 5.
+  window_minutes: 60
+  min_occurrences: 1
+  re_notify_after_minutes: 720
+
+quiet_hours:
+  enabled: false
+  timezone: "America/Sao_Paulo"
+  start: "22:00"
+  end: "08:00"
+  critical_breaks_quiet_hours: true
+
+max_recipients: 10
+
+rules:
+  # Falha repetida de workflow e o sinal de maior valor: os horarios observados
+  # sao deterministicos, ou seja, sao jobs agendados quebrados, nao incidentes.
+  # Janela de re-notificacao de 12h: um critico que ja escalou tem escada de
+  # escalacao, nao precisa repetir a cada 4h -- repetir treina o time a ignorar.
+  - name: "workflow_falhando_repetidamente"
+    event_types: ["execution_failed"]
+    severity: critical
+    min_streak: 3
+    notify: true
+    escalate_after_minutes: [15, 45]
+    template: "workflow_failing"
+    re_notify_after_minutes: 720
+
+  # Falha isolada: avisa UMA vez. A urgencia e tratada pela escada de escalacao
+  # (15/45 min), nao por repetir email. Um workflow que falha a noite e de novo
+  # de manha e o MESMO incidente -- dois emails seria ruido, nao informacao.
+  - name: "workflow_falhou_uma_vez"
+    event_types: ["execution_failed"]
+    severity: high
+    min_streak: 1
+    notify: true
+    template: "execution_failed"
+    re_notify_after_minutes: 720
+
+  - name: "workflow_desativado"
+    event_types: ["workflow_deactivated"]
+    severity: high
+    notify: true
+    template: "workflow_deactivated"
+
+  - name: "workflow_alterado_em_producao"
+    event_types: ["workflow_changed"]
+    severity: medium
+    notify: true
+    template: "workflow_changed"
+
+  - name: "credencial_alterada"
+    event_types: ["credential_updated"]
+    severity: high
+    notify: true
+    template: "credential_updated"
+
+  - name: "container_indisponivel"
+    event_types: ["container_stopped", "container_unhealthy"]
+    severity: critical
+    notify: true
+    escalate_after_minutes: [5]
+    template: "container_down"
+
+  - name: "restart_loop"
+    event_types: ["container_restart_loop"]
+    severity: high
+    notify: true
+    template: "restart_loop"
+
+  # Falha do proprio monitor: silencio e o pior modo de falha de um monitor.
+  - name: "coleta_com_buraco"
+    event_types: ["reconciliation_gap"]
+    severity: critical
+    notify: true
+    template: "reconciliation_gap"
+
+  - name: "n8n_indisponivel"
+    event_types: ["source_down"]
+    severity: critical
+    notify: false          # n8n fora do ar => vai para log, nao por email
+    template: "source_down"
+
+  - name: "workflow_ativado"
+    event_types: ["workflow_activated"]
+    severity: low
+    notify: true
+    template: "workflow_activated"
