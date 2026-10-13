@@ -10,7 +10,9 @@ Contexto e sempre o redigido.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
+
+from ..fuso import formatar_brasilia
 
 from .corpo_analise import corpo_com_analise
 
@@ -187,7 +189,7 @@ def render(
     d = dict(contexto or {})
     _padrao(d, "projeto", event.tenant_id or "(nao mapeado)")
     _padrao(d, "recurso", event.resource_id or "-")
-    _padrao(d, "quando", event.ts.strftime("%Y-%m-%d %H:%M:%S %Z"))
+    _padrao(d, "quando", formatar_horas(event.ts))
     _padrao(d, "sev_linha", f"Severidade: {SEV_LABEL.get(event.severity, event.severity)}")
     _padrao(d, "workflow_nome", d.get("recurso") or "-")
     _padrao(d, "workflow_id", event.resource_id or "-")
@@ -243,18 +245,8 @@ def _quem_mexeu(contexto: dict, template: str) -> str:
 
 
 def formatar_horas(dt: datetime | None) -> str:
-    """Instante em UTC COM o rotulo do fuso.
+    """Instante no horario de Brasilia, COM o rotulo do fuso (ex.: 16:00:00 (Brasília)).
 
-    A versao anterior imprimia `19:00:00` sem fuso, num servidor em `Hora oficial
-    do Brasil`. Quem lê em UTC-3 entende 19:00 local e erra a janela em 6 horas --
-    o alerta passa a dizer que a falha começou antes de realmente começar.
-
-    O alert e sobre o que aconteceu num servidor em fusos diferentes de quem le,
-    entao UTC rotulado e o honesto. Converter para o fuso do servidor seria
-    igualmente enganoso.
-    """
-    if dt is None:
-        return "-"
-    if dt.tzinfo is None:
-        return dt.strftime("%Y-%m-%d %H:%M:%S") + " (sem fuso)"
-    return dt.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    O rotulo evita a ambiguidade que o horario sem fuso causava (leitor em UTC-3
+    entendia 19:00 UTC como 19:00 local). Delega para `fuso.formatar_brasilia`."""
+    return formatar_brasilia(dt)

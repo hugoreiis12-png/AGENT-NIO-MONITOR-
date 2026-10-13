@@ -152,18 +152,19 @@ class Agent:
             **evento.detail, "tipo": evento.event_type,
             "titulo": evento.title, "severidade": evento.severity,
         }
-        assunto, corpo, status_llm = await compor(self.analyst, evento, contexto)
+        mensagem = await compor(self.analyst, evento, contexto, self.cfg)
 
         resultado = await self.notifier.send(
             recipients=destinatarios.emails,
-            subject=assunto,
-            body=corpo,
+            subject=mensagem.assunto,
+            body=mensagem.corpo,
+            html=mensagem.html,
             n8n_up=bool(self.health.n8n_up is not False),
             severity=evento.severity,
             metadata={
                 "event_id": str(evento.id),
                 "streak": evento.streak_count,
-                "llm": status_llm,
+                "llm": mensagem.status_llm,
             },
         )
 
@@ -171,8 +172,8 @@ class Agent:
             event_id=evento.id,
             channel=resultado.channel,
             recipients=resultado.recipients,
-            subject=assunto,
-            body=corpo,
+            subject=mensagem.assunto,
+            body=mensagem.corpo,
             status=resultado.status,
             error=resultado.error,
             attempts=resultado.attempts,

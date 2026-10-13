@@ -67,7 +67,9 @@ class ContainerCollector:
             eventos.extend(await self._processar_container(endpoint_id, row, stacks))
         atuais = {parse_container(r)["name"]: {"stack": stack_do_container(r)} for r in rows}
         for nome, info in self.tracker.removidos(endpoint_id, atuais):
-            eventos.append(self._evento_removido(nome, dono_da_stack(info["stack"], stacks)))
+            removido = self._evento_removido(nome, dono_da_stack(info["stack"], stacks))
+            removido.detail["endpoint_id"] = endpoint_id
+            eventos.append(removido)
         return eventos
 
     async def _processar_container(self, endpoint_id: int, row: dict, stacks: dict[str, dict]) -> list[EventRecord]:
@@ -82,6 +84,7 @@ class ContainerCollector:
             logs = await self._log_recente(endpoint_id, container_id)
             for e in eventos:
                 e.detail["logs"] = logs
+                e.detail["endpoint_id"] = endpoint_id
         self.repo.record_container_observation(
             container_id, now_utc(), state=container["state"], health=container["health"], restart_count=reinicios,
         )

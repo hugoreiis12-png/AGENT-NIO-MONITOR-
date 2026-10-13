@@ -72,6 +72,7 @@ class StackCollector:
             title=f"Stack {nome} alterada ({pct}% do compose)", resource_id=str(stack.get("Id")),
             detail={
                 "recurso": nome, "workflow_nome": nome, "stack": nome,
+                "stack_id": stack.get("Id"), "endpoint_id": stack.get("EndpointId"),
                 "autor": stack.get("UpdatedBy") or None, "responsavel_stack": stack.get("CreatedBy") or None,
                 "resumo_diff": resumo, "detalhe": f"{pct}% do compose mudou.",
             },

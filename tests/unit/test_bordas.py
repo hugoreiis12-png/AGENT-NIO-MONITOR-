@@ -228,8 +228,8 @@ class TestFusoHorario:
         from agent_nio_monitor.notify.templates import formatar_horas
 
         saida = formatar_horas(datetime(2026, 10, 12, 19, 0, tzinfo=UTC))
-        assert "19:00:00" in saida
-        assert "UTC" in saida, f"saida sem fuso: {saida!r}"
+        assert "16:00:00" in saida, "19:00 UTC e 16:00 em Brasilia"
+        assert "Brasília" in saida, f"saida sem fuso: {saida!r}"
 
     def test_formatar_horas_none(self) -> None:
         from agent_nio_monitor.notify.templates import formatar_horas

@@ -20,16 +20,16 @@ from .agent import Agent, build
 from .capabilities import CapabilityReport, capability_rows, detect, render_table
 from .config.loader import ConfigError, load
 from .config.schema import AppConfig
+from .fuso import FUSO_NOME
 from .health import HealthServer
 
 __all__ = ["Agent", "build", "main"]
 
 log = structlog.get_logger()
 
-LOG_TIMEZONE = "America/Sao_Paulo"
 
 
-def local_timestamper(timezone: str = LOG_TIMEZONE):  # noqa: ANN201 - processor do structlog
+def local_timestamper(timezone: str = FUSO_NOME):  # noqa: ANN201 - processor do structlog
     """Carimbo ISO com o deslocamento explicito (ex.: -03:00): o instante continua
     inequivoco, mas o horario bate com o relogio de quem le o log."""
     tz = ZoneInfo(timezone)

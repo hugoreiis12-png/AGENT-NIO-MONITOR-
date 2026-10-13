@@ -70,6 +70,7 @@ class Notifier:
         n8n_up: bool = True,
         severity: str = "medium",
         metadata: dict[str, Any] | None = None,
+        html: str | None = None,
     ) -> DispatchResult:
         if not recipients:
             log.error("notificacao_sem_destinatario", subject=subject)
@@ -84,6 +85,7 @@ class Notifier:
             "to": recipients,
             "subject": subject,
             "body": body,
+            "html": html,
             "severity": severity,
             "headers": {"X-Priority": _priority(severity)},
             "metadata": metadata or {},

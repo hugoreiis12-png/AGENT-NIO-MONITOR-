@@ -1,4 +1,4 @@
-"""Fatos do alerta: o MESMO texto alimenta o prompt do LLM e a secao "Detalhes" do e-mail."""
+"""Fatos do alerta: os MESMOS dados alimentam o prompt do LLM e a secao "Detalhes" do e-mail."""
 
 from __future__ import annotations
 
@@ -11,11 +11,18 @@ CAMPOS_DE_FATO = (
 MAX_FATO = 1200
 
 
-def fatos(contexto: dict, excluir: tuple[str, ...] = ()) -> str:
-    linhas = []
+def pares(contexto: dict, excluir: tuple[str, ...] = ()) -> list[tuple[str, str]]:
+    """(rotulo, valor) dos fatos presentes, sem repetir o mesmo par."""
+    saida: list[tuple[str, str]] = []
     for chave, rotulo in CAMPOS_DE_FATO:
         valor = contexto.get(chave)
-        linha = f"{rotulo}: {str(valor)[:MAX_FATO]}"
-        if chave not in excluir and valor not in (None, "") and linha not in linhas:
-            linhas.append(linha)
-    return "\n".join(linhas)
+        if chave in excluir or valor in (None, ""):
+            continue
+        par = (rotulo, str(valor)[:MAX_FATO])
+        if par not in saida:
+            saida.append(par)
+    return saida
+
+
+def fatos(contexto: dict, excluir: tuple[str, ...] = ()) -> str:
+    return "\n".join(f"{rotulo}: {valor}" for rotulo, valor in pares(contexto, excluir))

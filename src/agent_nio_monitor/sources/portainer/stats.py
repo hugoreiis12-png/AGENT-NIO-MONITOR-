@@ -56,7 +56,7 @@ class ResourceCollector:
             amostras = await asyncio.gather(*(self._amostra(int(endpoint["Id"]), r, semaforo) for r in rodando))
             for row, (cpu, mem) in zip(rodando, amostras, strict=True):
                 total += 1
-                evento = self._avaliar(row, cpu, mem, stacks)
+                evento = self._avaliar(row, cpu, mem, stacks, int(endpoint["Id"]))
                 if evento is not None:
                     eventos.append(evento)
         return CollectorResult(collected=total, extra={"eventos": eventos})
@@ -80,7 +80,9 @@ class ResourceCollector:
             return None
         return cpu_do_host_pct(anterior, atual)
 
-    def _avaliar(self, row: dict, cpu: float | None, mem: float | None, stacks: dict[str, dict]) -> EventRecord | None:
+    def _avaliar(
+        self, row: dict, cpu: float | None, mem: float | None, stacks: dict[str, dict], endpoint_id: int,
+    ) -> EventRecord | None:
         container = parse_container(row)
         container_id = container["container_id"]
         self.repo.record_container_observation(
@@ -97,13 +99,13 @@ class ResourceCollector:
         self._altas[container_id] = self._altas.get(container_id, 0) + 1
         if self._altas[container_id] != self.sustentacao:
             return None
-        return self._evento(container, "; ".join(excessos), dono_da_stack(stack_do_container(row), stacks))
+        return self._evento(container, "; ".join(excessos), dono_da_stack(stack_do_container(row), stacks), endpoint_id)
 
-    def _evento(self, container: dict, excessos: str, dono: dict) -> EventRecord:
+    def _evento(self, container: dict, excessos: str, dono: dict, endpoint_id: int) -> EventRecord:
         nome = container["name"]
         detalhe = f"Consumo acima do limite por {self.sustentacao} coletas seguidas: {excessos}."
         return EventRecord(
             id=new_event_id(), ts=now_utc(), source=self.source, event_type="container_resource_high",
             severity="high", title=f"Consumo alto: {nome}", resource_id=container["container_id"],
-            detail={"recurso": nome, "workflow_nome": nome, "detalhe": detalhe, **dono},
+            detail={"recurso": nome, "workflow_nome": nome, "detalhe": detalhe, "endpoint_id": endpoint_id, **dono},
         )

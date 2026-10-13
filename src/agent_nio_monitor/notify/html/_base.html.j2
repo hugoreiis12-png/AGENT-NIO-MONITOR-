@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light only">
+<title>{{ assunto }}</title>
+</head>
+<body style="margin:0;padding:0;background:#EFEAE0;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;font-size:1px;line-height:1px;">{{ preheader }}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#EFEAE0;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:560px;background:#FDF7EC;border-radius:18px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;color:#1F2A1F;">
+
+  <tr><td align="center" style="padding:28px 24px 6px;">
+    <img src="{{ assets }}/logo.png" width="130" alt="JFC" style="display:block;border:0;width:130px;height:auto;">
+  </td></tr>
+
+  <tr><td align="center" style="padding:8px 24px 0;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td width="34" height="34" align="center" valign="middle" style="width:34px;height:34px;background:{{ tema.cor }};border-radius:17px;color:#FFFFFF;font-size:20px;font-weight:bold;line-height:34px;">{% block glifo %}!{% endblock %}</td>
+      <td style="padding-left:10px;font-size:18px;font-weight:bold;letter-spacing:.5px;color:{{ tema.cor_texto }};">{{ rotulo }}</td>
+    </tr></table>
+  </td></tr>
+
+  <tr><td align="center" style="padding:12px 24px 2px;">
+    <h1 style="margin:0;font-size:32px;line-height:38px;color:#0B3A1A;font-weight:bold;">{% block titulo %}{{ tema.titulo }}{% endblock %}</h1>
+  </td></tr>
+  <tr><td align="center" style="padding:6px 32px 18px;">
+    <p style="margin:0;font-size:19px;line-height:25px;color:#0B3A1A;font-weight:bold;">{{ subtitulo }}</p>
+  </td></tr>
+
+  <tr><td style="padding:0;line-height:0;font-size:0;">
+    <img src="{{ assets }}/{{ tema.hero }}" width="560" alt="" style="display:block;border:0;width:100%;height:auto;">
+  </td></tr>
+
+  <tr><td style="padding:22px 30px 4px;">
+    {% macro secao(titulo) %}
+    <p style="margin:18px 0 6px;font-size:13px;font-weight:bold;letter-spacing:.8px;text-transform:uppercase;color:{{ tema.cor_texto }};">{{ titulo }}</p>
+    {% endmacro %}
+
+    {{ secao("O que aconteceu") }}
+    <p style="margin:0;font-size:16px;line-height:23px;">{{ resumo }}</p>
+
+    {% if causa %}
+    {{ secao("Causa provável") }}
+    <p style="margin:0;font-size:15px;line-height:22px;">{{ causa }}</p>
+    {% endif %}
+
+    {% if passos %}
+    {{ secao("Como resolver") }}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+      {% for passo in passos %}
+      <tr>
+        <td width="26" valign="top" style="padding:3px 0;font-size:15px;font-weight:bold;color:{{ tema.cor_texto }};">{{ loop.index }}.</td>
+        <td valign="top" style="padding:3px 0;font-size:15px;line-height:22px;">{{ passo }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if detalhes or quando %}
+    {{ secao("Detalhes") }}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E6DCC8;">
+      {% for rotulo_d, valor in detalhes %}
+      <tr>
+        <td width="38%" valign="top" style="padding:7px 8px 7px 0;border-bottom:1px solid #E6DCC8;font-size:13px;color:#5C6B5C;">{{ rotulo_d }}</td>
+        <td valign="top" style="padding:7px 0;border-bottom:1px solid #E6DCC8;font-size:14px;line-height:20px;word-break:break-word;">{{ valor }}</td>
+      </tr>
+      {% endfor %}
+      <tr>
+        <td width="38%" valign="top" style="padding:7px 8px 7px 0;border-bottom:1px solid #E6DCC8;font-size:13px;color:#5C6B5C;">Quando</td>
+        <td valign="top" style="padding:7px 0;border-bottom:1px solid #E6DCC8;font-size:14px;">{{ quando }}</td>
+      </tr>
+    </table>
+    {% endif %}
+
+    {% if log %}
+    {{ secao("Log recente") }}
+    <pre style="margin:0;padding:10px 12px;background:#F1EADB;border-radius:8px;font-family:Consolas,Menlo,monospace;font-size:12px;line-height:17px;white-space:pre-wrap;word-break:break-all;color:#2B332B;">{{ log }}</pre>
+    {% endif %}
+
+    {% if quem %}
+    {{ secao("Quem mexeu") }}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+      {% for rotulo_q, valor in quem %}
+      <tr>
+        <td width="38%" valign="top" style="padding:3px 8px 3px 0;font-size:13px;color:#5C6B5C;">{{ rotulo_q }}</td>
+        <td valign="top" style="padding:3px 0;font-size:14px;">{{ valor }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+  </td></tr>
+
+  {% if botao %}
+  <tr><td align="center" style="padding:26px 30px 8px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td align="center" style="background:{{ tema.cor }};border-radius:28px;">
+        <a href="{{ botao.url }}" style="display:inline-block;padding:15px 38px;font-size:17px;font-weight:bold;color:#FFFFFF;text-decoration:none;font-family:Arial,Helvetica,sans-serif;">{{ botao.texto }}</a>
+      </td>
+    </tr></table>
+  </td></tr>
+  {% endif %}
+
+  <tr><td align="center" style="padding:22px 30px 26px;font-size:12px;line-height:18px;color:#3F4C3F;">
+    {% if suporte %}Se tiver dúvidas, entre em contato com nossa equipe:<br><a href="mailto:{{ suporte }}" style="color:#0B3A1A;font-weight:bold;text-decoration:none;">{{ suporte }}</a><br><br>{% endif %}
+    <span style="color:#7A867A;">Enviado automaticamente pelo Hermes Monitor</span>
+  </td></tr>
+  <tr><td style="height:8px;background:{{ tema.cor }};font-size:0;line-height:0;">&nbsp;</td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>
