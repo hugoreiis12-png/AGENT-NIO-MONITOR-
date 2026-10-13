@@ -103,10 +103,10 @@ class TestConfigReal:
         assert ".env" in entradas
 
     def test_cadencia_de_workflow_respeita_o_custo_medido(self) -> None:
-        """ADR D6: 11,2 MB por pagina. A 60 s seriam ~16 GB/dia. Piso de 3 min
+        """ADR D6: 11,2 MB por pagina. A 60 s seriam ~16 GB/dia. Piso de 1 min
         (decisao do dono: edicao de workflow precisa chegar rapido); abaixo
         disso o poll do corpo completo estoura a banda do n8n."""
-        assert load().polling.workflow_full_seconds >= 180
+        assert load().polling.workflow_full_seconds >= 60
 
     def test_ambiente_inexistente_e_rejeitado(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Config invalida tem que falhar no boot. Falhar em producao as 3h da

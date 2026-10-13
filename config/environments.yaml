@@ -21,12 +21,13 @@ active_environment: production
 
 # Cadencias distintas porque o custo e assimetrico (ADR D6).
 # Medido na instancia real: GET /api/v1/workflows = 11,2 MB por pagina.
-# A 60 s seriam 16 GB/dia so para descobrir que nada mudou; a 180 s sao ~5 GB/dia
-# de leitura (rede local) e o snapshot so e gravado quando ha mudanca.
+# A 60 s sao ~16 GB/dia de leitura (rede local) para descobrir que nada mudou -- custo
+# aceito pelo dono para a edicao de workflow chegar em ate 1 min. O snapshot so e
+# gravado quando ha mudanca, entao o banco nao cresce com isso.
 polling:
   execution_errors_seconds: 60
   workflow_active_seconds: 300
-  workflow_full_seconds: 180
+  workflow_full_seconds: 60
   container_state_seconds: 60
   container_stats_seconds: 300
   reconciliation_seconds: 3600
