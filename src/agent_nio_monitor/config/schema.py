@@ -48,15 +48,14 @@ class MailConfig(BaseModel):
     max_attempts: int = Field(default=3, ge=1, le=10)
 
 
-class LlamaConfig(BaseModel):
-    """O LLM REDIGE. Nao decide severidade, nao decide destinatario (ADR D3)."""
+class LlmConfig(BaseModel):
+    """O LLM analisa e REDIGE. Nao decide severidade nem destinatario (ADR D3)."""
 
     base_url: str
     model: str
     timeout_seconds: float = Field(default=60.0, gt=0)
-    num_ctx: int = Field(default=8192, ge=512)
     temperature: float = Field(default=0.2, ge=0.0, le=1.0)
-    max_tokens: int = Field(default=400, ge=64)
+    max_tokens: int = Field(default=700, ge=64)
     # Se o LLM cair, o alerta precisa sair assim mesmo -- com texto deterministico.
     fallback_to_template: bool = True
 
@@ -128,7 +127,7 @@ class AppConfig(BaseModel):
     environments: dict[str, EnvironmentConfig]
     polling: PollingConfig = PollingConfig()
     mail: MailConfig
-    llm: LlamaConfig
+    llm: LlmConfig
     database: DatabaseConfig
     policy: PolicyConfig
     active_environment: str = "production"

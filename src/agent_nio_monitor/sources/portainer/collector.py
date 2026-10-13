@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import structlog
 
+from ...redaction import redact_text
 from ...store.repository import EventRecord, Repository, new_event_id, now_utc
 from ..base import CollectorResult
 from .client import PortainerApiError, PortainerClient, parse_container
@@ -19,6 +20,8 @@ from .client import PortainerApiError, PortainerClient, parse_container
 log = structlog.get_logger(__name__)
 
 LABEL_STACK = "com.docker.compose.project"
+LOG_LINHAS = 40
+LOG_MAX_CHARS = 1200
 
 
 class ContainerCollector:
@@ -49,7 +52,7 @@ class ContainerCollector:
                 continue
             for row in containers:
                 total += 1
-                eventos.extend(self._processar_container(row, stacks))
+                eventos.extend(await self._processar_container(int(endpoint_id), row, stacks))
 
         return CollectorResult(collected=total, extra={"eventos": eventos})
 
@@ -61,7 +64,9 @@ class ContainerCollector:
             log.warning("stacks_indisponiveis_alerta_sem_dono", erro=str(exc))
             return {}
 
-    def _processar_container(self, row: dict, stacks: dict[str, dict]) -> list[EventRecord]:
+    async def _processar_container(
+        self, endpoint_id: int, row: dict, stacks: dict[str, dict]
+    ) -> list[EventRecord]:
         container = parse_container(row)
         container_id = container["container_id"]
         nome = container["name"]
@@ -82,6 +87,10 @@ class ContainerCollector:
         if ficou_unhealthy_agora:
             eventos.append(self._evento_unhealthy(container_id, nome, container, _dono(row, stacks)))
 
+        if eventos:
+            logs = await self._log_recente(endpoint_id, container_id)
+            for e in eventos:
+                e.detail["logs"] = logs
         self.repo.record_container_observation(
             container_id,
             now_utc(),
@@ -90,6 +99,15 @@ class ContainerCollector:
             restart_count=container["restart_count"],
         )
         return eventos
+
+    async def _log_recente(self, endpoint_id: int, container_id: str) -> str | None:
+        """Melhor esforco: sem log o alerta sai igual. Redigido antes de sair daqui."""
+        try:
+            texto = await self.client.container_logs(endpoint_id, container_id, tail=LOG_LINHAS)
+        except PortainerApiError as exc:
+            log.warning("log_do_container_indisponivel", container_id=container_id, erro=str(exc))
+            return None
+        return redact_text(texto.strip())[-LOG_MAX_CHARS:] or None
 
     def _evento_parado(self, container_id: str, nome: str, container: dict, dono: dict) -> EventRecord:
         return EventRecord(

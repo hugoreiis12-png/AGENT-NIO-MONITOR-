@@ -13,9 +13,9 @@ from agent_nio_monitor.config.loader import load
 from agent_nio_monitor.store.repository import EventRecord, InMemoryRepository
 
 
-class _EscritorFixo:
-    async def write(self, contexto: dict) -> tuple[str, str]:
-        return "abertura", "fallback"
+class _AnalistaFixo:
+    async def analyze(self, contexto: dict) -> tuple[None, str]:
+        return None, "fallback"
 
 
 async def test_alerta_sem_destinatario_e_registrado_como_falha(
@@ -24,7 +24,7 @@ async def test_alerta_sem_destinatario_e_registrado_como_falha(
     monkeypatch.setenv("N8N_API_KEY", "k")
     repo = InMemoryRepository()
     agent = Agent(load(), repo)
-    agent.writer = _EscritorFixo()
+    agent.analyst = _AnalistaFixo()
     evento = EventRecord(
         id=uuid4(),
         ts=datetime(2026, 10, 13, 12, 0, tzinfo=UTC),

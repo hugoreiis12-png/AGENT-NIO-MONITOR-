@@ -84,6 +84,9 @@ class PortainerClient:
 )
 
     async def _get(self, path: str, params: dict | None = None) -> Any:
+        return (await self._fetch(path, params)).json()
+
+    async def _fetch(self, path: str, params: dict | None = None) -> httpx.Response:
         try:
             resp = await self._client.get(f"{self.base_url}{path}", params=params)
         except httpx.HTTPError as exc:
@@ -94,7 +97,7 @@ class PortainerClient:
             )
         if resp.is_error:
             raise PortainerApiError(f"{resp.status_code} em {path}", resp.status_code)
-        return resp.json()
+        return resp
 
     async def list_endpoints(self) -> list[dict[str, Any]]:
         return list(await self._get("/api/endpoints"))
@@ -129,10 +132,23 @@ class PortainerClient:
         self, endpoint_id: int, container_id: str, *, tail: int = 200
     ) -> str:
         """Sob demanda, NUNCA no ciclo. 1 MB por container a cada 60 s e absurdo."""
-        return await self._get(
+        resp = await self._fetch(
             f"/api/endpoints/{endpoint_id}/docker/containers/{container_id}/logs",
             {"stdout": "true", "stderr": "true", "tail": str(tail)},
         )
+        return decode_docker_log(resp.content)
+
+
+def decode_docker_log(raw: bytes) -> str:
+    """Sem TTY o Docker multiplexa: cada quadro tem 8 bytes (tipo, 0,0,0, tamanho)."""
+    partes: list[bytes] = []
+    pos = 0
+    while pos + 8 <= len(raw) and raw[pos] in (0, 1, 2) and raw[pos + 1 : pos + 4] == bytes(3):
+        tamanho = int.from_bytes(raw[pos + 4 : pos + 8], "big")
+        partes.append(raw[pos + 8 : pos + 8 + tamanho])
+        pos += 8 + tamanho
+    texto = b"".join(partes) if partes and pos >= len(raw) else raw
+    return texto.decode("utf-8", errors="replace")
 
 
 def parse_container(row: dict[str, Any]) -> dict[str, Any]:

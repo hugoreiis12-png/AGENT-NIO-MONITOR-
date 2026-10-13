@@ -38,13 +38,14 @@ mail:
   webhook_url: "http://192.168.0.160:5678"
   webhook_path: "/webhook/agent-nio-monitor"
 
-# O LLM REDIGE o texto do alerta. Nao decide severidade nem destinatario.
+# O LLM ANALISA o erro e REDIGE o alerta. Nao decide severidade nem destinatario.
+# Qwen no vLLM local (API compativel com OpenAI).
 llm:
-  base_url: "http://192.168.0.140:11434"
-  model: "hermes3:8b"
-  num_ctx: 8192
+  base_url: "http://192.168.0.140:8001/v1"
+  model: "RedHatAI/Qwen3.8-27B-INT4"
+  timeout_seconds: 60
   temperature: 0.2
-  max_tokens: 400
+  max_tokens: 700
   fallback_to_template: true
 
 # Schema separado. NUNCA o mesmo database do n8n.

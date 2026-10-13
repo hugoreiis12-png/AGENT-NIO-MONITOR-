@@ -28,7 +28,7 @@ Formato: decisão · alternativas descartadas · por quê · trade-off aceito ·
 
 ## D3 — O LLM redige; a regra decide
 
-**Decisão:** `hermes3:8b` escreve o parágrafo de abertura do alerta. Severidade, destinatário, dedup e quiet-hours são regras determinísticas.
+**Decisão:** o LLM (Qwen3.8-27B no vLLM local; antes `hermes3:8b`) analisa o erro e redige resumo, causa provável e passos para resolver. Severidade, destinatário, dedup e quiet-hours são regras determinísticas.
 **Descartado:** LLM decide criticidade.
 **Por quê:** um 8B Q4 (4,34 GB) é não-determinístico e frágil em raciocínio multi-passo. Decisão de alerta não pode depender de caixa-preta. Além disso o fallback precisa ser completo: se o LLM cair, o alerta tem que sair igual.
 **Trade-off:** o texto pode ser medíocre. Aceito — o requisito é "direto", e o modelo entrega.

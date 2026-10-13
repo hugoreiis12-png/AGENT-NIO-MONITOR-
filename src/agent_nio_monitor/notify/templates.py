@@ -10,7 +10,9 @@ Contexto e sempre o redigido.
 
 from __future__ import annotations
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+
+from .corpo_analise import corpo_com_analise
 
 SEV_LABEL = {
     "critical": "CRITICO",
@@ -200,6 +202,13 @@ def render(
     d["link_workflow"] = f"Ver no n8n: {d['url_workflow']}\n" if d["url_workflow"] else ""
 
     assunto = _assunto(template, event, d)
+    cabecalho = _HEAD.format(**d)
+    quem = _quem_mexeu(contexto or {}, template)
+
+    if (contexto or {}).get("analise"):
+        acao = ACAO_PADRAO.get(template, ACAO_PADRAO["generic"])
+        corpo = corpo_com_analise(contexto, acao, d["url_workflow"])
+        return assunto, f"{cabecalho}\n{corpo}{quem}".strip()
 
     if template in ("workflow_failing", "execution_failed"):
         corpo = _BODY_EXEC.format(**d)
@@ -208,7 +217,7 @@ def render(
     else:
         corpo = _BODY_SIMPLE.format(**d)
 
-    return assunto, f"{_HEAD.format(**d)}\n{corpo}{_quem_mexeu(contexto or {}, template)}".strip()
+    return assunto, f"{cabecalho}\n{corpo}{quem}".strip()
 
 
 def _quem_mexeu(contexto: dict, template: str) -> str:

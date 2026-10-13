@@ -22,6 +22,12 @@ def _mock_endpoints(stacks: list[dict] | None = None) -> None:
     respx.get(f"{PTAI}/api/stacks").mock(return_value=httpx.Response(200, json=stacks or []))
 
 
+def _mock_logs(texto: bytes = b"") -> None:
+    respx.get(url__regex=rf"{PTAI}/api/endpoints/1/docker/containers/.+/logs").mock(
+        return_value=httpx.Response(200, content=texto)
+    )
+
+
 def _mock_containers(containers: list[dict]) -> None:
     respx.get(f"{PTAI}/api/endpoints/1/docker/containers/json").mock(
         return_value=httpx.Response(200, json=containers)
@@ -44,6 +50,7 @@ class TestChecagemDeEstado:
         repo = InMemoryRepository()
         col = ContainerCollector(PortainerClient(PTAI, "tok"), repo)
         _mock_endpoints()
+        _mock_logs()
         _mock_containers([{"Id": "abc", "Names": ["/worker"], "State": "running",
                             "Status": "Up 2 hours"}])
         await col.check_state()
@@ -62,6 +69,7 @@ class TestChecagemDeEstado:
         repo = InMemoryRepository()
         col = ContainerCollector(PortainerClient(PTAI, "tok"), repo)
         _mock_endpoints()
+        _mock_logs()
         _mock_containers([{"Id": "abc", "Names": ["/worker"], "State": "running",
                             "Status": "Up 2 hours (healthy)"}])
         await col.check_state()
@@ -98,6 +106,7 @@ class TestChecagemDeEstado:
         repo = InMemoryRepository()
         col = ContainerCollector(PortainerClient(PTAI, "tok"), repo)
         _mock_endpoints([{"Name": "comprove", "CreatedBy": "admin", "UpdatedBy": "carlos"}])
+        _mock_logs()
         rotulos = {"com.docker.compose.project": "comprove"}
         _mock_containers([{"Id": "abc", "Names": ["/worker"], "State": "running",
                             "Status": "Up", "Labels": rotulos}])
@@ -114,6 +123,7 @@ class TestChecagemDeEstado:
         repo = InMemoryRepository()
         col = ContainerCollector(PortainerClient(PTAI, "tok"), repo)
         _mock_endpoints()
+        _mock_logs()
         respx.get(f"{PTAI}/api/stacks").mock(return_value=httpx.Response(500))
         _mock_containers([{"Id": "abc", "Names": ["/w"], "State": "running", "Status": "Up"}])
         await col.check_state()
@@ -121,3 +131,28 @@ class TestChecagemDeEstado:
         eventos = (await col.check_state()).extra["eventos"]
         assert len(eventos) == 1
         assert "autor" not in eventos[0].detail
+
+    @respx.mock
+    async def test_evento_leva_o_log_recente_redigido(self) -> None:
+        col = ContainerCollector(PortainerClient(PTAI, "tok"), InMemoryRepository())
+        _mock_endpoints()
+        quadro = b"connect ECONNREFUSED 10.0.0.5:443 password=hunter2\n"
+        _mock_logs(bytes([1, 0, 0, 0]) + len(quadro).to_bytes(4, "big") + quadro)
+        _mock_containers([{"Id": "abc", "Names": ["/w"], "State": "running", "Status": "Up"}])
+        await col.check_state()
+        _mock_containers([{"Id": "abc", "Names": ["/w"], "State": "exited", "Status": "Exited (1)"}])
+        evento = (await col.check_state()).extra["eventos"][0]
+        assert "ECONNREFUSED" in evento.detail["logs"]
+        assert "hunter2" not in evento.detail["logs"]
+
+    @respx.mock
+    async def test_log_indisponivel_nao_derruba_o_alerta(self) -> None:
+        col = ContainerCollector(PortainerClient(PTAI, "tok"), InMemoryRepository())
+        _mock_endpoints()
+        respx.get(url__regex=rf"{PTAI}/api/endpoints/1/docker/containers/.+/logs").mock(
+            return_value=httpx.Response(500))
+        _mock_containers([{"Id": "abc", "Names": ["/w"], "State": "running", "Status": "Up"}])
+        await col.check_state()
+        _mock_containers([{"Id": "abc", "Names": ["/w"], "State": "exited", "Status": "Exited (1)"}])
+        evento = (await col.check_state()).extra["eventos"][0]
+        assert evento.detail["logs"] is None

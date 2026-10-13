@@ -102,7 +102,7 @@ Estes testes usam **dados reais** da sua instância, não inventados:
   (`Password: jfc2025` do SAP, `user=postgres password=postgres` do `dblink`).
 - **Política**: as 25 execuções com erro mais recentes, com os horários reais.
 - **Coleta**: o cursor invalidados pelo prune, e o caso de 400 em vez de 404.
-- **LLM**: `hermes3:8b` real em `192.168.0.140:11434`.
+- **LLM**: Qwen (`RedHatAI/Qwen3.8-27B-INT4`, vLLM) real em `192.168.0.140:8001/v1`.
 
 ---
 

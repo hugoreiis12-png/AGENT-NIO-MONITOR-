@@ -15,11 +15,13 @@ import structlog
 from .config.loader import ConfigError, load_policy
 from .config.schema import AppConfig
 from .health import HealthState
-from .llm.writer import AlertWriter, LlmClient
+from .llm.analyst import AlertAnalyst
+from .llm.client import LlmClient
+from .notify.compose import compor
 from .notify.mailer import DispatchResult, Notifier
 from .notify.people import exclusive_by_workflow, people_by_project, portainer_users
 from .notify.resolver import RecipientResolver
-from .notify.templates import formatar_horas, render
+from .notify.templates import formatar_horas
 from .rules.engine import RuleEngine
 from .sources.n8n.client import N8NClient
 from .sources.n8n.collector import ExecutionErrorCollector
@@ -43,11 +45,10 @@ class Agent:
         self.llm = LlmClient(
             cfg.llm.base_url, cfg.llm.model,
             timeout=cfg.llm.timeout_seconds,
-            num_ctx=cfg.llm.num_ctx,
             temperature=cfg.llm.temperature,
             max_tokens=cfg.llm.max_tokens,
         )
-        self.writer = AlertWriter(self.llm, enabled=cfg.llm.fallback_to_template)
+        self.analyst = AlertAnalyst(self.llm, enabled=cfg.llm.fallback_to_template)
         self.notifier = Notifier(
             webhook_url=f"{cfg.mail.webhook_url}{cfg.mail.webhook_path}",
             timeout=cfg.mail.timeout_seconds,
@@ -152,12 +153,7 @@ class Agent:
             **evento.detail, "tipo": evento.event_type,
             "titulo": evento.title, "severidade": evento.severity,
         }
-        abertura, status_llm = await self.writer.write(contexto)
-        assunto, corpo = render(
-            evento.detail.get("template", "generic"), event=evento,
-            contexto={**contexto, "abertura": abertura},
-        )
-        corpo = f"{abertura}\n{corpo}"
+        assunto, corpo, status_llm = await compor(self.analyst, evento, contexto)
 
         resultado = await self.notifier.send(
             recipients=destinatarios.emails,
