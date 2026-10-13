@@ -78,9 +78,9 @@ class WorkflowMonitor:
     ) -> CollectorResult:
         """Ciclo lento: body completo, projecao, diff contra o ultimo snapshot.
 
-        Sempre grava um snapshot novo, mudanca ou nao -- senao o ciclo seguinte
-        comparar contra um `before` desatualizado (o que gera diff fantasma
-        incluindo coisa que ja tinha sido relatada antes)."""
+        So grava snapshot novo quando o workflow e novo ou o diff achou mudanca: assim
+        o `before` do ciclo seguinte e sempre o ultimo estado ja relatado, sem
+        inchar o banco com 2 MB identicos a cada ciclo."""
         nomes = name_by_id or {}
         eventos: list[EventRecord] = []
         baseline = self.repo.has_workflow_snapshots()
@@ -104,19 +104,20 @@ class WorkflowMonitor:
         version_id = workflow.get("versionId")
 
         anterior = self.repo.last_workflow_snapshot(workflow_id)
-        self.repo.save_workflow_snapshot(workflow_id, version_id, ativo, workflow)
         self.repo.upsert_resource(
             source=self.source, kind="workflow", external_id=workflow_id,
             name=nome, critical=False, meta={"active": ativo},
         )
 
         if anterior is None:
+            self.repo.save_workflow_snapshot(workflow_id, version_id, ativo, workflow)
             # Sem linha de base global e a primeira coleta; com ela, e workflow NOVO.
             return self._evento_criado(workflow, workflow_id, nome) if baseline else None
 
         mudancas: list[Change] = diff_workflows(anterior["body"], workflow)
         if not mudancas:
-            return None
+            return None  # snapshot equivalente ao atual: gravar de novo so incharia o banco
+        self.repo.save_workflow_snapshot(workflow_id, version_id, ativo, workflow)
 
         pontos, fatores = risco_para_score(mudancas)
         return EventRecord(

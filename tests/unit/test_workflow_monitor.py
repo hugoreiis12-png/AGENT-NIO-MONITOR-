@@ -142,3 +142,30 @@ class TestWorkflowCriado:
         await mon.check_structural_diff()
         _mock_workflows([_wf("1", True, versionId="v2")])
         assert (await mon.check_structural_diff()).extra["eventos"] == []
+
+
+def N8N_CLIENT() -> N8NClient:
+    return N8NClient(N8N, "k", verify_ssl=False)
+
+
+class TestSnapshotSoQuandoMuda:
+    @respx.mock
+    async def test_ciclos_sem_mudanca_nao_gravam_snapshot_novo(self) -> None:
+        repo = InMemoryRepository()
+        mon = WorkflowMonitor(N8N_CLIENT(), repo)
+        _mock_workflows([_wf("1", True)])
+        for _ in range(4):
+            await mon.check_structural_diff()
+        assert len(repo.snapshots["1"]) == 1
+
+    @respx.mock
+    async def test_mudanca_grava_e_vira_a_nova_base(self) -> None:
+        repo = InMemoryRepository()
+        mon = WorkflowMonitor(N8N_CLIENT(), repo)
+        _mock_workflows([_wf("1", True, nodes=[{"id": "a", "name": "A", "type": "t"}])])
+        await mon.check_structural_diff()
+        _mock_workflows([_wf("1", True, nodes=[{"id": "a", "name": "A", "type": "t"},
+                                                 {"id": "b", "name": "B", "type": "t"}])])
+        await mon.check_structural_diff()
+        await mon.check_structural_diff()
+        assert len(repo.snapshots["1"]) == 2
