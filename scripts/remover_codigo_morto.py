@@ -38,7 +38,7 @@ def remover(caminho: pathlib.Path, nome: str) -> bool:
     if inicio is None:
         return False
 
-    # sobe para incluir decoradores imediatamente acima
+    # Sobe  para incluir decoradores imediatamente para cima 
     while inicio > 0 and linhas[inicio - 1].lstrip().startswith("@"):
         inicio -= 1
 
