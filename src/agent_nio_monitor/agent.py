@@ -85,7 +85,9 @@ class Agent:
 
         # O streak ja foi acumulado pelo coletor. Aqui so se DECIDE o que fazer.
         eventos: list[EventRecord] = []
+        ultimos = resultado.extra.get("ultimos_erros", {})
         for workflow_id, streak in resultado.extra.get("streaks", {}).items():
+            falha = ultimos.get(workflow_id)
             nome = getattr(streak, "workflow_name", None) or workflow_id
             decisao = self.rules.evaluate(
                 event_type="execution_failed",
@@ -112,6 +114,8 @@ class Agent:
                         "workflow_nome": nome,
                         "ocorrencias": streak.count,
                         "autor": self.index.authors.get(workflow_id),
+                        "erro": falha.error_msg if falha else None,
+                        "no": falha.last_node if falha else None,
                         "primeira": primeiro,
                         "ultima": ultimo,
                         "notificar": decisao.notify,

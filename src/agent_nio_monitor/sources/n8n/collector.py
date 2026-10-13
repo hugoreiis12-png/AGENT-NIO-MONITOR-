@@ -22,6 +22,8 @@ from .client import CursorInvalid, N8NApiError, N8NClient
 
 log = structlog.get_logger(__name__)
 
+MAX_ERRO = 600
+
 
 def _parse_dt(value: str | None) -> datetime | None:
     if not value:
@@ -126,7 +128,7 @@ class ExecutionErrorCollector:
             failures=len(falhas),
             gap=gap,
             duration_ms=int((now_utc() - inicio).total_seconds() * 1000),
-            extra={"streaks": streaks},
+            extra={"streaks": streaks, "ultimos_erros": _ultimo_erro_por_workflow(falhas)},
         )
 
     async def _varredura_completa(
@@ -198,11 +200,8 @@ class ExecutionErrorCollector:
         truncado = True
         try:
             detalhe = await self.client.get_execution(record.id, include_data=True)
-            data = detalhe.get("data") or {}
-            resultado = data.get("resultData") or {}
-            erro = (detalhe.get("error") or {}).get("message") or data.get("error")
-            ultimo_no = resultado.get("lastNodeExecuted")
-            run_data = resultado.get("runData")
+            erro, ultimo_no = extrair_erro(detalhe)
+            run_data = ((detalhe.get("data") or {}).get("resultData") or {}).get("runData")
             truncado = bool(detalhe.get("dataTooLargeToDisplay", False))
         except N8NApiError as exc:
             # Falhar em buscar o payload NAO pode perder o evento principal.
@@ -222,3 +221,22 @@ class ExecutionErrorCollector:
             truncated=truncado,
         )
 
+
+def extrair_erro(detalhe: dict[str, Any]) -> tuple[str | None, str | None]:
+    """(mensagem, no) de uma execucao. Na API real o erro mora em
+    `data.resultData.error`; o no vem do proprio erro ou de `lastNodeExecuted`."""
+    resultado = (detalhe.get("data") or {}).get("resultData") or {}
+    erro = resultado.get("error") or detalhe.get("error") or {}
+    partes = [str(erro[k]).strip() for k in ("message", "description") if erro.get(k)]
+    mensagem = " | ".join(dict.fromkeys(partes))[:MAX_ERRO] or None
+    no = (erro.get("node") or {}).get("name") or resultado.get("lastNodeExecuted")
+    return mensagem, no
+
+
+def _ultimo_erro_por_workflow(falhas: list[FailureRecord]) -> dict[str, FailureRecord]:
+    ultimos: dict[str, FailureRecord] = {}
+    for f in falhas:
+        atual = ultimos.get(f.workflow_id)
+        if atual is None or f.started_at > atual.started_at:
+            ultimos[f.workflow_id] = f
+    return ultimos

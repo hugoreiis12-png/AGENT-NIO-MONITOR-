@@ -43,7 +43,7 @@ Escreva o paragrafo de abertura."""
 CAMPOS_DE_FATO = (
     ("workflow_nome", "Recurso"), ("recurso", "Recurso"), ("stack", "Stack"),
     ("ocorrencias", "Ocorrencias"), ("primeira", "Primeira falha"), ("ultima", "Ultima falha"),
-    ("erro", "Erro"), ("detalhe", "Detalhe"), ("resumo_diff", "Mudancas"),
+    ("erro", "Erro"), ("no", "No que falhou"), ("detalhe", "Detalhe"), ("resumo_diff", "Mudancas"),
     ("autor", "Ultima alteracao por"),
 )
 MAX_FATO = 300
