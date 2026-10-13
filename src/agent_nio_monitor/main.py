@@ -11,6 +11,8 @@ import argparse
 import asyncio
 import signal
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import structlog
 
@@ -24,13 +26,27 @@ __all__ = ["Agent", "build", "main"]
 
 log = structlog.get_logger()
 
+LOG_TIMEZONE = "America/Sao_Paulo"
+
+
+def local_timestamper(timezone: str = LOG_TIMEZONE):  # noqa: ANN201 - processor do structlog
+    """Carimbo ISO com o deslocamento explicito (ex.: -03:00): o instante continua
+    inequivoco, mas o horario bate com o relogio de quem le o log."""
+    tz = ZoneInfo(timezone)
+
+    def processor(_logger: object, _name: str, event_dict: dict) -> dict:
+        event_dict["timestamp"] = datetime.now(tz).isoformat(timespec="microseconds")
+        return event_dict
+
+    return processor
+
 
 def setup_logging(level: str) -> None:
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
+            local_timestamper(),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.JSONRenderer(ensure_ascii=False),

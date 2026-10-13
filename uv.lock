@@ -18,6 +18,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "structlog" },
     { name = "tenacity" },
+    { name = "tzdata" },
 ]
 
 [package.optional-dependencies]
@@ -51,6 +52,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "structlog", specifier = ">=24.1" },
     { name = "tenacity", specifier = ">=9.0" },
+    { name = "tzdata", specifier = ">=2024.1" },
 ]
 provides-extras = ["dev"]
 
