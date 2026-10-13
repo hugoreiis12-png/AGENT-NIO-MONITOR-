@@ -37,7 +37,8 @@ class TestPolicyReal:
             "execution_failed", "workflow_changed", "workflow_activated",
             "workflow_deactivated", "credential_updated", "container_stopped",
             "container_unhealthy", "container_restart_loop", "reconciliation_gap",
-            "source_down",
+            "source_down", "workflow_created", "stack_changed", "container_removed",
+            "container_resource_high",
         }
         p = load_policy()
         for r in p.rules:
@@ -49,7 +50,13 @@ class TestPolicyReal:
         cobertos: set[str] = set()
         for r in load_policy().rules:
             cobertos.update(r.event_types)
-        for et in ("execution_failed", "source_down", "reconciliation_gap"):
+        emitidos = (
+            "execution_failed", "source_down", "reconciliation_gap", "workflow_created",
+            "workflow_changed", "workflow_activated", "workflow_deactivated", "stack_changed",
+            "container_stopped", "container_unhealthy", "container_removed",
+            "container_restart_loop", "container_resource_high",
+        )
+        for et in emitidos:
             assert et in cobertos, f"{et} e emitido pelo codigo mas nao tem regra"
 
 

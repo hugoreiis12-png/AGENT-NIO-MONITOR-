@@ -357,6 +357,23 @@ class PostgresRepository(Repository):
             ).fetchone()
         return dict(row) if row else None
 
+    def has_workflow_snapshots(self) -> bool:
+        with self.db.connection() as conn:
+            row = conn.execute(
+                sql.SQL("SELECT 1 FROM {t} LIMIT 1").format(t=self._t("workflow_snapshot"))
+            ).fetchone()
+        return row is not None
+
+    def list_resources(self, source: str, kind: str) -> list[dict[str, Any]]:
+        with self.db.connection() as conn:
+            rows = conn.execute(
+                sql.SQL(
+                    "SELECT external_id, name, tenant_id, meta FROM {t} WHERE source = %s AND kind = %s"
+                ).format(t=self._t("resource")),
+                (source, kind),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def upsert_resource(self, **kwargs: Any) -> None:
         with self.db.connection() as conn:
             conn.execute(

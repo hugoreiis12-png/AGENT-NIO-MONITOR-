@@ -34,6 +34,7 @@ class PollingConfig(BaseModel):
     workflow_full_seconds: float = Field(default=900.0, gt=0)
     container_state_seconds: float = Field(default=60.0, gt=0)
     container_stats_seconds: float = Field(default=300.0, gt=0)
+    stack_changes_seconds: float = Field(default=300.0, gt=0)
     reconciliation_seconds: float = Field(default=3600.0, gt=0)
     digest_hour: int = Field(default=9, ge=0, le=23)
     health_seconds: float = Field(default=30.0, gt=0)
@@ -116,7 +117,19 @@ class QuietHoursConfig(BaseModel):
     critical_breaks_quiet_hours: bool = True
 
 
+class ThresholdsConfig(BaseModel):
+    """O que torna uma mudanca ou consumo RELEVANTE o bastante para alertar."""
+
+    stack_change_ratio: float = Field(default=0.20, gt=0, le=1)
+    restart_loop_count: int = Field(default=3, ge=2)
+    restart_loop_window_minutes: int = Field(default=10, ge=1)
+    cpu_host_pct: float = Field(default=80.0, gt=0, le=100)
+    mem_pct: float = Field(default=90.0, gt=0, le=100)
+    sustained_samples: int = Field(default=3, ge=1)
+
+
 class PolicyConfig(BaseModel):
+    thresholds: ThresholdsConfig = ThresholdsConfig()
     aggregation: AggregationConfig = AggregationConfig()
     quiet_hours: QuietHoursConfig = QuietHoursConfig()
     rules: list[NotificationRule] = Field(min_length=1)

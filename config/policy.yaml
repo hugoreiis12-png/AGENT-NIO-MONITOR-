@@ -25,6 +25,18 @@ quiet_hours:
 
 max_recipients: 10
 
+# O que e RELEVANTE o bastante para alertar (nao alerta abaixo disso).
+thresholds:
+  # Stack so alerta se o compose mudou mais que isso (0.20 = 20% das linhas).
+  stack_change_ratio: 0.20
+  # Loop de reinicio: N reinicios dentro da janela.
+  restart_loop_count: 3
+  restart_loop_window_minutes: 10
+  # Consumo: precisa ficar acima do limite por N coletas seguidas (5 min cada).
+  cpu_host_pct: 80      # % do CPU total do host usado pelo container
+  mem_pct: 90           # % do limite de memoria do container
+  sustained_samples: 3
+
 rules:
   # Falha repetida de workflow e o sinal de maior valor: os horarios observados
   # sao deterministicos, ou seja, sao jobs agendados quebrados, nao incidentes.
@@ -74,6 +86,30 @@ rules:
     notify: true
     escalate_after_minutes: [5]
     template: "container_down"
+
+  - name: "stack_alterada"
+    event_types: ["stack_changed"]
+    severity: high
+    notify: true
+    template: "stack_changed"
+
+  - name: "container_removido"
+    event_types: ["container_removed"]
+    severity: high
+    notify: true
+    template: "container_removed"
+
+  - name: "consumo_alto"
+    event_types: ["container_resource_high"]
+    severity: high
+    notify: true
+    template: "container_resource_high"
+
+  - name: "workflow_criado"
+    event_types: ["workflow_created"]
+    severity: medium
+    notify: true
+    template: "workflow_created"
 
   - name: "restart_loop"
     event_types: ["container_restart_loop"]

@@ -83,9 +83,10 @@ class WorkflowMonitor:
         incluindo coisa que ja tinha sido relatada antes)."""
         nomes = name_by_id or {}
         eventos: list[EventRecord] = []
+        baseline = self.repo.has_workflow_snapshots()
         try:
             async for wf in self.client.iter_workflows():
-                evento = self._processar_workflow(wf, nomes)
+                evento = self._processar_workflow(wf, nomes, baseline)
                 if evento is not None:
                     eventos.append(evento)
         except N8NApiError as exc:
@@ -95,7 +96,7 @@ class WorkflowMonitor:
         return CollectorResult(collected=len(eventos), extra={"eventos": eventos})
 
     def _processar_workflow(
-        self, workflow: dict[str, Any], nomes: dict[str, str]
+        self, workflow: dict[str, Any], nomes: dict[str, str], baseline: bool
     ) -> EventRecord | None:
         workflow_id = str(workflow.get("id"))
         nome = str(workflow.get("name") or nomes.get(workflow_id) or workflow_id)
@@ -110,7 +111,8 @@ class WorkflowMonitor:
         )
 
         if anterior is None:
-            return None  # primeira vez que este workflow e visto: nada pra diffar
+            # Sem linha de base global e a primeira coleta; com ela, e workflow NOVO.
+            return self._evento_criado(workflow, workflow_id, nome) if baseline else None
 
         mudancas: list[Change] = diff_workflows(anterior["body"], workflow)
         if not mudancas:
@@ -131,8 +133,28 @@ class WorkflowMonitor:
                 "workflow_nome": nome,
                 "recurso": nome,
                 "resumo_diff": resumo(mudancas),
-                "autor": autoria_de(workflow) or "Autoria nao disponivel nesta versao do n8n",
+                "autor": autoria_de(workflow),
                 "risco_score": pontos,
                 "risco_fatores": fatores,
+            },
+        )
+
+    def _evento_criado(self, workflow: dict[str, Any], workflow_id: str, nome: str) -> EventRecord:
+        nos = workflow.get("nodes") or []
+        tipos = sorted({str(n.get("type", "?")).rsplit(".", 1)[-1] for n in nos})
+        return EventRecord(
+            id=new_event_id(),
+            ts=now_utc(),
+            source=self.source,
+            event_type="workflow_created",
+            severity="medium",
+            title=f"{nome} foi criado",
+            resource_id=workflow_id,
+            detail={
+                "workflow_id": workflow_id,
+                "workflow_nome": nome,
+                "recurso": nome,
+                "resumo_diff": f"Workflow novo com {len(nos)} nodes ({', '.join(tipos[:8]) or 'vazio'}).",
+                "autor": autoria_de(workflow),
             },
         )

@@ -110,3 +110,35 @@ class TestDiffEstrutural:
 
         r3 = await mon.check_structural_diff()
         assert r3.collected == 0, "nada mudou desde o ciclo 2 -- nao pode repetir o evento"
+
+
+class TestWorkflowCriado:
+    @respx.mock
+    async def test_workflow_novo_depois_da_linha_de_base_gera_evento(self) -> None:
+        repo = InMemoryRepository()
+        mon = WorkflowMonitor(N8NClient(N8N, "k", verify_ssl=False), repo)
+        _mock_workflows([_wf("1", True)])
+        await mon.check_structural_diff()
+
+        novo = _wf("2", False, nodes=[{"id": "a", "name": "A", "type": "n8n-nodes-base.webhook"}],
+                   activeVersion={"authors": "Ana <ana@x.com>"})
+        _mock_workflows([_wf("1", True), novo])
+        eventos = (await mon.check_structural_diff()).extra["eventos"]
+        assert [e.event_type for e in eventos] == ["workflow_created"]
+        assert eventos[0].resource_id == "2"
+        assert eventos[0].detail["autor"] == "Ana <ana@x.com>"
+        assert "1 nodes (webhook)" in eventos[0].detail["resumo_diff"]
+
+    @respx.mock
+    async def test_primeira_coleta_de_todos_nao_vira_um_evento_por_workflow(self) -> None:
+        mon = WorkflowMonitor(N8NClient(N8N, "k", verify_ssl=False), InMemoryRepository())
+        _mock_workflows([_wf("1", True), _wf("2", True), _wf("3", False)])
+        assert (await mon.check_structural_diff()).extra["eventos"] == []
+
+    @respx.mock
+    async def test_edicao_que_nao_muda_nada_nao_gera_evento(self) -> None:
+        mon = WorkflowMonitor(N8NClient(N8N, "k", verify_ssl=False), InMemoryRepository())
+        _mock_workflows([_wf("1", True)])
+        await mon.check_structural_diff()
+        _mock_workflows([_wf("1", True, versionId="v2")])
+        assert (await mon.check_structural_diff()).extra["eventos"] == []

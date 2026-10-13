@@ -157,7 +157,17 @@ class Repository(ABC):
         sem ele, cada ciclo compararia contra nada e nunca detectaria mudanca."""
 
     @abstractmethod
+    def has_workflow_snapshots(self) -> bool:
+        """Ja existe linha de base? Sem ela, workflow sem snapshot e 'primeira
+        coleta'; com ela, e workflow NOVO."""
+
+    @abstractmethod
     def upsert_resource(self, **kwargs: Any) -> None: ...
+
+    @abstractmethod
+    def list_resources(self, source: str, kind: str) -> list[dict[str, Any]]:
+        """Recursos conhecidos de um tipo (external_id, name, meta). Base de
+        comparacao da stack: o snapshot do compose mora em `meta`."""
 
     @abstractmethod
     def record_reconciliation(self, **kwargs: Any) -> None: ...
@@ -300,6 +310,12 @@ class InMemoryRepository(Repository):
     def last_workflow_snapshot(self, workflow_id: str) -> dict[str, Any] | None:
         historico = self.snapshots.get(workflow_id)
         return historico[-1] if historico else None
+
+    def has_workflow_snapshots(self) -> bool:
+        return bool(self.snapshots)
+
+    def list_resources(self, source: str, kind: str) -> list[dict[str, Any]]:
+        return [r for (s, k, _), r in self.resources.items() if s == source and k == kind]
 
     def upsert_resource(self, **kwargs: Any) -> None:
         key = (kwargs["source"], kwargs["kind"], kwargs["external_id"])

@@ -27,8 +27,7 @@ from .sources.n8n.client import N8NClient
 from .sources.n8n.collector import ExecutionErrorCollector
 from .sources.n8n.workflow_index import WorkflowIndex
 from .sources.n8n.workflow_monitor import WorkflowMonitor
-from .sources.portainer.client import PortainerClient
-from .sources.portainer.collector import ContainerCollector
+from .sources.portainer.suite import build_portainer
 from .store.postgres_repository import PostgresRepository
 from .store.repository import EventRecord, Repository, new_event_id, now_utc
 
@@ -70,7 +69,7 @@ class Agent:
         self.n8n = self.resolver.client
         self.index = WorkflowIndex(self.n8n)
         self.workflow_monitor = WorkflowMonitor(self.n8n, self.repo)
-        self.containers = _build_container_collector(cfg, self.repo)
+        self.containers, self.stacks, self.resources = build_portainer(cfg, self.repo) or (None, None, None)
 
     # ------------------------------------------------------------ ciclo n8n
 
@@ -218,27 +217,35 @@ class Agent:
         evento.detail["template"] = decisao.template
         return evento
 
+    async def _ciclo(self, resultado, chave: str) -> int:  # noqa: ANN001 - CollectorResult
+        self.health.mark(chave, resultado.ok)
+        eventos = [self._decidir(e) for e in resultado.extra.get("eventos", [])]
+        return await self.process_events(eventos)
+
     async def check_workflows_active(self) -> int:
         await self.index.load()
         resultado = await self.workflow_monitor.check_active_state(name_by_id=self.index.names)
-        self.health.mark("n8n_workflows_state", resultado.ok)
-        eventos = [self._decidir(e) for e in resultado.extra.get("eventos", [])]
-        return await self.process_events(eventos)
+        return await self._ciclo(resultado, "n8n_workflows_state")
 
     async def check_workflows_full(self) -> int:
         await self.index.load()
         resultado = await self.workflow_monitor.check_structural_diff(name_by_id=self.index.names)
-        self.health.mark("n8n_workflows_full", resultado.ok)
-        eventos = [self._decidir(e) for e in resultado.extra.get("eventos", [])]
-        return await self.process_events(eventos)
+        return await self._ciclo(resultado, "n8n_workflows_full")
 
     async def check_containers(self) -> int:
         if self.containers is None:
             return 0
-        resultado = await self.containers.check_state()
-        self.health.mark("portainer_containers", resultado.ok)
-        eventos = [self._decidir(e) for e in resultado.extra.get("eventos", [])]
-        return await self.process_events(eventos)
+        return await self._ciclo(await self.containers.check_state(), "portainer_containers")
+
+    async def check_stacks(self) -> int:
+        if self.stacks is None:
+            return 0
+        return await self._ciclo(await self.stacks.check_changes(), "portainer_stacks")
+
+    async def check_container_resources(self) -> int:
+        if self.resources is None:
+            return 0
+        return await self._ciclo(await self.resources.check_resources(), "portainer_resources")
 
 
 def _active_url(cfg: AppConfig) -> str:
@@ -249,23 +256,6 @@ def _secret(cfg: AppConfig) -> str:
     import os
 
     return os.environ.get(cfg.active.n8n.api_key_env, "")
-
-
-def _build_container_collector(cfg: AppConfig, repo: Repository) -> ContainerCollector | None:
-    """None quando Portainer nao esta configurado ou sem credencial -- mesmo
-    criterio do `doctor`. Sem isso o agente cairia na borda errada: travar o
-    boot por falta de um recurso opcional, em vez de so deixar o ciclo de lado."""
-    import os
-
-    env = cfg.active.portainer
-    if env is None:
-        return None
-    api_key = os.environ.get(env.api_key_env, "")
-    if not api_key:
-        log.warning("portainer_sem_credencial_ciclo_de_container_desligado")
-        return None
-    client = PortainerClient(env.url, api_key, verify_ssl=env.verify_ssl, timeout=env.timeout_seconds)
-    return ContainerCollector(client, repo)
 
 
 def build(cfg: AppConfig, repo: Repository | None = None) -> Agent:

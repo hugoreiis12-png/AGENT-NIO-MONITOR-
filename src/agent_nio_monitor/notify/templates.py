@@ -33,6 +33,10 @@ SUBJECT = {
     "restart_loop": "[{sev}] {nome} em loop de reinicio",
     "reconciliation_gap": "[{sev}] Falha na coleta -- buraco de {min}min",
     "source_down": "[{sev}] {fonte} indisponivel",
+    "workflow_created": "[{sev}] {nome} foi criado",
+    "stack_changed": "[{sev}] Stack {nome} foi alterada",
+    "container_removed": "[{sev}] Container removido: {nome}",
+    "container_resource_high": "[{sev}] Consumo alto: {nome}",
     "generic": "[{sev}] {titulo}",
 }
 
@@ -105,6 +109,10 @@ ACAO_PADRAO = {
     "restart_loop": "Checar memoria/CPU e a ultima alteracao no servico.",
     "reconciliation_gap": "O monitor perdeu eventos. Conferir se o n8n podou execucoes antigas.",
     "source_down": "Restaurar o servico. O monitor nao consegue notificar por email enquanto isso.",
+    "workflow_created": "Confirmar com o autor que o workflow era esperado e revisar credenciais e gatilhos.",
+    "stack_changed": "Conferir com quem alterou se a mudanca era esperada e se os servicos subiram.",
+    "container_removed": "Confirmar se a remocao foi intencional; se nao, recriar a partir da stack.",
+    "container_resource_high": "Ver o que consome o recurso e ajustar o limite ou escalar o servico.",
     "generic": "Ver o detalhe do evento.",
 }
 

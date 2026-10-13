@@ -108,6 +108,11 @@ class PortainerClient:
         compose -- e sem risco de vazar `Env` com senha."""
         return list(await self._get("/api/stacks"))
 
+    async def stack_file(self, stack_id: int | str) -> str:
+        """Compose atual da stack. So buscado quando UpdateDate/UpdatedBy mudam."""
+        dados = await self._get(f"/api/stacks/{stack_id}/file")
+        return str(dados.get("StackFileContent") or "")
+
     async def list_containers(self, endpoint_id: int) -> list[dict[str, Any]]:
         """Chamada em lote: devolve todos os containers do endpoint."""
         return list(

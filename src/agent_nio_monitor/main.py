@@ -141,27 +141,23 @@ def _instala_handlers_de_sinal(stop: asyncio.Event) -> None:
 
 async def _agenda(agent: Agent, stop: asyncio.Event) -> None:
     """Cadencias do plano: erro 60s, estado de workflow 300s, diff completo
-    900s, estado de container 60s.
+    900s, estado de container 60s, stacks e consumo 300s.
 
     Deliberadamente NAO usa APScheduler ainda: timers com asyncio bastam, e
-    APScheduler traria job em disco (persistencia) que nao precisamos. Se
-    aparecer janela de manutenção, ai sim.
+    APScheduler traria job em disco (persistencia) que nao precisamos.
 
     `reconcile` (3600s) fica pendente -- e um ciclo de auditoria de recursos
-    (`resource` table) distinto de T5/T6/T7, nao coberto por esta fiacao.
-    `containers_stats` tambem fica pendente -- enriquece a observacao com
-    cpu/mem, mas nao decide alerta (ver docstring de `ContainerCollector`).
+    (`resource` table) distinto dos coletores, nao coberto por esta fiacao.
     """
     jobs = {
         "executions": (agent.cfg.polling.execution_errors_seconds, agent.run_once),
         "workflows_state": (agent.cfg.polling.workflow_active_seconds, agent.check_workflows_active),
         "workflows_full": (agent.cfg.polling.workflow_full_seconds, agent.check_workflows_full),
         "containers_state": (agent.cfg.polling.container_state_seconds, agent.check_containers),
+        "stacks": (agent.cfg.polling.stack_changes_seconds, agent.check_stacks),
+        "containers_stats": (agent.cfg.polling.container_stats_seconds, agent.check_container_resources),
     }
-    pendentes = {
-        "reconcile": agent.cfg.polling.reconciliation_seconds,
-        "containers_stats": agent.cfg.polling.container_stats_seconds,
-    }
+    pendentes = {"reconcile": agent.cfg.polling.reconciliation_seconds}
     intervals = {nome: intervalo for nome, (intervalo, _) in jobs.items()} | pendentes
     proximos = {nome: 0.0 for nome in intervals}
     loop = asyncio.get_running_loop()
