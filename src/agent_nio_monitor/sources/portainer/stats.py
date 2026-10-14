@@ -13,7 +13,7 @@ from typing import Any
 import structlog
 
 from ...store.repository import EventRecord, Repository, new_event_id, now_utc
-from ..base import CollectorResult
+from ..base import CollectorResult, _erro_total_de_endpoints
 from .client import PortainerApiError, PortainerClient, parse_container
 from .donos import dono_da_stack, stack_do_container, stacks_por_nome
 from .metrics import cpu_do_host_pct, memoria_pct, totais_de_cpu
@@ -45,13 +45,20 @@ class ResourceCollector:
         semaforo = asyncio.Semaphore(CONCORRENCIA)
         eventos: list[EventRecord] = []
         total = 0
+        escuros: list[int] = []
+        endpoints_consultados = 0
         for endpoint in endpoints:
             if endpoint.get("Id") is None:
                 continue
+            endpoints_consultados += 1
             try:
                 rows = await self.client.list_containers(int(endpoint["Id"]))
             except PortainerApiError as exc:
+                # Mesmojuizo de `collector.py`: parcial vira `failures`, total
+                # vira `error`. Sem isso o consumo de um endpoint inteiro fora do
+                # ar sumia e o `/healthz` continuava verde.
                 log.error("listagem_de_containers_falhou", endpoint_id=endpoint["Id"], erro=str(exc))
+                escuros.append(int(endpoint["Id"]))
                 continue
             rodando = [r for r in rows if (r.get("State") or "").lower() == "running"]
             amostras = await asyncio.gather(*(self._amostra(int(endpoint["Id"]), r, semaforo) for r in rodando))
@@ -60,7 +67,12 @@ class ResourceCollector:
                 evento = self._avaliar(row, cpu, mem, stacks, int(endpoint["Id"]))
                 if evento is not None:
                     eventos.append(evento)
-        return CollectorResult(collected=total, extra={"eventos": eventos})
+        return CollectorResult(
+            collected=total,
+            failures=len(escuros),
+            error=_erro_total_de_endpoints(escuros, endpoints_consultados),
+            extra={"eventos": eventos, "endpoints_escuros": escuros},
+        )
 
     async def _amostra(self, endpoint_id: int, row: dict, semaforo: asyncio.Semaphore) -> tuple[float | None, float | None]:
         container_id = parse_container(row)["container_id"]

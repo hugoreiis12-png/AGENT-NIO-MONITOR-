@@ -10,6 +10,10 @@ services:
       N8N_API_KEY: ${N8N_API_KEY:?defina N8N_API_KEY}
       PORTAINER_API_KEY: ${PORTAINER_API_KEY:?defina PORTAINER_API_KEY}
       DATABASE_DSN: ${DATABASE_DSN:?defina DATABASE_DSN}
+      # Opcionais: sem elas o ciclo do Power Automate (RPA) fica desligado, o resto sobe.
+      POWERAUTOMATE_TENANT_ID: ${POWERAUTOMATE_TENANT_ID:-}
+      POWERAUTOMATE_CLIENT_ID: ${POWERAUTOMATE_CLIENT_ID:-}
+      POWERAUTOMATE_CLIENT_SECRET: ${POWERAUTOMATE_CLIENT_SECRET:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "8099:8099"

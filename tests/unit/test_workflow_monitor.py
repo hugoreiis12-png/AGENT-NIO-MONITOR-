@@ -11,7 +11,7 @@ import respx
 
 from agent_nio_monitor.sources.n8n.client import N8NClient
 from agent_nio_monitor.sources.n8n.workflow_monitor import WorkflowMonitor
-from agent_nio_monitor.store.repository import InMemoryRepository
+from agent_nio_monitor.store.memory_repository import InMemoryRepository
 
 N8N = "http://n8n.test"
 

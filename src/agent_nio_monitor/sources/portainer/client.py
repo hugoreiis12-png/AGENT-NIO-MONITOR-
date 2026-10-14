@@ -77,12 +77,11 @@ class PortainerClient:
         await self.aclose()
 
     @retry(
-       retry=retry_if_exception(_deve_retryar),
-       stop=stop_after_attempt(3),
-       wait=wait_exponential(multiplier=0.5, min=0.5, max=5),
-       reraise=True,
-)
-
+        retry=retry_if_exception(_deve_retryar),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=5),
+        reraise=True,
+    )
     async def _get(self, path: str, params: dict | None = None) -> Any:
         return (await self._fetch(path, params)).json()
 
@@ -185,20 +184,3 @@ def parse_container(row: dict[str, Any]) -> dict[str, Any]:
         "restart_count": None,
         "created": row.get("Created"),
     }
-
-
-def resource_control_users(stack: dict[str, Any]) -> list[str]:
-    """Quem tem acesso ao stack. Base da resolucao 'responsavel no Portainer'."""
-    control = stack.get("ResourceControl") or {}
-    policies = control.get("UserAccessPolicies") or {}
-    return [str(uid) for uid in policies]
-
-
-def stack_mudou(antes: dict[str, Any] | None, agora: dict[str, Any]) -> bool:
-    """Sinal mais barato que existe no Portainer."""
-    if antes is None:
-        return True
-    for campo in ("UpdateDate", "UpdatedBy", "ConfigHash", "Status", "EntryPoint", "ProjectPath"):
-        if antes.get(campo) != agora.get(campo):
-            return True
-    return False

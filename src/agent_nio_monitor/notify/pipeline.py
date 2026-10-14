@@ -62,5 +62,5 @@ class EventPipeline:
             self.queue.purge(agora())
         self._ticks += 1
         resultado = await self.dispatcher.tick()
-        self.health.queue = self.queue.stats(agora())
+        self.health.registra_fila(self.queue.stats(agora()))
         return resultado

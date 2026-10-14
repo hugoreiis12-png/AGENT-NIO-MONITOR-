@@ -13,7 +13,8 @@ from agent_nio_monitor.notify.mailer import DispatchResult
 from agent_nio_monitor.notify.pipeline import EventPipeline
 from agent_nio_monitor.rules.engine import RuleEngine
 from agent_nio_monitor.store.queue import InMemoryQueue, agora
-from agent_nio_monitor.store.repository import EventRecord, InMemoryRepository
+from agent_nio_monitor.store.repository import EventRecord
+from agent_nio_monitor.store.memory_repository import InMemoryRepository
 
 
 class Checador:
@@ -114,3 +115,21 @@ class TestDespachar:
         await p.flush()
         assert p.enqueue([_ev("container_stopped", "a")]) == 0
         assert len(envio.enviados) == 1
+
+
+class TestTempoNaFila:
+    @pytest.mark.parametrize("tipo", ["execution_failed", "container_stopped", "container_resource_high"])
+    @pytest.mark.parametrize("fase", [0.001, 0.5, 0.999])
+    async def test_alerta_persistente_sai_em_ate_50s(self, cfg, tipo: str, fase: float) -> None:  # noqa: ANN001
+        """Ticks reais a cada `queue_seconds`, em qualquer fase em relacao a entrada do alerta."""
+        p, _, fila, envio, _ = _pipeline(cfg)
+        p.enqueue([_ev(tipo, "a")])
+        entrada, passo = fila.items[0].created_at, cfg.polling.queue_seconds
+
+        tick = 0
+        while not envio.enviados:
+            agora_do_tick = entrada + timedelta(seconds=passo * (tick + fase))
+            await p.dispatcher.tick(agora_do_tick)
+            tick += 1
+
+        assert (agora_do_tick - entrada).total_seconds() <= 50

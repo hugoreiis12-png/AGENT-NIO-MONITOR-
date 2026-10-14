@@ -7,7 +7,7 @@ import respx
 
 from agent_nio_monitor.sources.n8n.client import N8NClient
 from agent_nio_monitor.sources.n8n.collector import ExecutionErrorCollector, extrair_erro
-from agent_nio_monitor.store.repository import InMemoryRepository
+from agent_nio_monitor.store.memory_repository import InMemoryRepository
 
 N8N = "http://n8n.test"
 DETALHE = {

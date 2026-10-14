@@ -13,7 +13,7 @@ import structlog
 
 from ...redaction import redact_text
 from ...store.repository import EventRecord, Repository, new_event_id, now_utc
-from ..base import CollectorResult
+from ..base import CollectorResult, _erro_total_de_endpoints
 from .client import PortainerApiError, PortainerClient, parse_container
 from .donos import dono_da_stack, stack_do_container, stacks_por_nome
 from .lifecycle import LifecycleTracker
@@ -61,17 +61,31 @@ class ContainerCollector:
         self._atuais = {}
         eventos: list[EventRecord] = []
         total = 0
+        escuros: list[int] = []
+        endpoints_consultados = 0
         for endpoint in endpoints:
             if endpoint.get("Id") is None:
                 continue
+            endpoints_consultados += 1
             try:
                 rows = await self.client.list_containers(int(endpoint["Id"]))
             except PortainerApiError as exc:
+                # NAO e `continue` silencioso. Um endpoint inteiro escuro mantinha
+                # `error=None`, e `Agent._ciclo` marcava a fonte como SAUDAVEL --
+                # um monitor que reporta saude enquanto nao ve nada. Aqui o
+                # endpoint entra na conta; se TODOS cairem, vira `error`.
                 log.error("listagem_de_containers_falhou", endpoint_id=endpoint["Id"], erro=str(exc))
+                escuros.append(int(endpoint["Id"]))
                 continue
             total += len(rows)
             eventos.extend(await self._processar_endpoint(int(endpoint["Id"]), rows, stacks))
-        return CollectorResult(collected=total, extra={"eventos": eventos})
+
+        return CollectorResult(
+            collected=total,
+            failures=len(escuros),
+            error=_erro_total_de_endpoints(escuros, endpoints_consultados),
+            extra={"eventos": eventos, "endpoints_escuros": escuros},
+        )
 
     async def _processar_endpoint(self, endpoint_id: int, rows: list[dict], stacks: dict[str, dict]) -> list[EventRecord]:
         eventos: list[EventRecord] = []

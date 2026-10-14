@@ -17,16 +17,31 @@ class SourceConfig(BaseModel):
     timeout_seconds: float = Field(default=30.0, gt=0, le=300)
 
 
+class PowerAutomateConfig(BaseModel):
+    """Dataverse de um ambiente da Power Platform, lido pelo service principal.
+
+    Credencial por client credentials (Entra ID): so os NOMES das variaveis ficam aqui.
+    """
+
+    dataverse_url: str = Field(min_length=1, pattern=r"^https://")
+    tenant_id_env: str = "POWERAUTOMATE_TENANT_ID"
+    client_id_env: str = "POWERAUTOMATE_CLIENT_ID"
+    client_secret_env: str = "POWERAUTOMATE_CLIENT_SECRET"
+    timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+
+
 class EnvironmentConfig(BaseModel):
     n8n: SourceConfig
     portainer: SourceConfig | None = None
+    powerautomate: PowerAutomateConfig | None = None
 
 
 class PollingConfig(BaseModel):
-    """Coleta e disparo entre 25 s e 1 min (decisao do dono).
+    """Coleta entre 25 s e 1 min; fila entre 5 e 25 s (decisao do dono).
 
-    O piso protege as fontes (`GET /api/v1/workflows` devolve 11,2 MB: a 60 s ja sao
-    ~16 GB/dia) e o teto garante que o alerta chegue em ate ~1 ciclo + a fila.
+    O piso da coleta protege as fontes (`GET /api/v1/workflows` devolve 11,2 MB: a 60 s
+    ja sao ~16 GB/dia). A fila nao le as fontes (so estado local e 1 consulta por
+    execucao pendente), entao gira mais rapido: espera + tick <= `queue_max_delay_seconds`.
     """
 
     execution_errors_seconds: float = Field(default=30.0, ge=25.0, le=60.0)
@@ -34,7 +49,8 @@ class PollingConfig(BaseModel):
     container_state_seconds: float = Field(default=30.0, ge=25.0, le=60.0)
     container_stats_seconds: float = Field(default=60.0, ge=25.0, le=60.0)
     stack_changes_seconds: float = Field(default=60.0, ge=25.0, le=60.0)
-    queue_seconds: float = Field(default=30.0, ge=25.0, le=60.0)
+    queue_seconds: float = Field(default=10.0, ge=5.0, le=25.0)
+    queue_max_delay_seconds: float = Field(default=50.0, ge=30.0, le=120.0)
     reconciliation_seconds: float = Field(default=3600.0, gt=0)
     digest_hour: int = Field(default=9, ge=0, le=23)
     health_seconds: float = Field(default=30.0, gt=0)

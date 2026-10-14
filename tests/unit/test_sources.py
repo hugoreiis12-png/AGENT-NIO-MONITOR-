@@ -16,14 +16,12 @@ import respx
 from agent_nio_monitor.capabilities import (
     detect,
     probe_n8n,
-    render_table,
 )
+from agent_nio_monitor.capabilities_report import render_table
 from agent_nio_monitor.health import HealthState
 from agent_nio_monitor.sources.portainer.client import (
     PortainerClient,
     parse_container,
-    resource_control_users,
-    stack_mudou,
 )
 
 PTAI = "https://portainer.test"
@@ -85,34 +83,10 @@ class TestParseContainer:
         assert p["health"] is None
 
 
-class TestResourceControl:
-    def test_extrai_usuarios_do_stack(self) -> None:
-        stack = {
-            "Id": 1,
-            "ResourceControl": {"UserAccessPolicies": {"3": {"RoleID": 1}, "7": {"RoleID": 2}}},
-        }
-        assert resource_control_users(stack) == ["3", "7"]
-
-    def test_stack_sem_resource_control(self) -> None:
-        assert resource_control_users({"Id": 1, "ResourceControl": None}) == []
-
-
-class TestDeteccaoDeMudancaDeStack:
-    @pytest.mark.parametrize(
-        "campo", ["UpdateDate", "UpdatedBy", "ConfigHash", "Status", "ProjectPath"]
-    )
-    def test_campo_mudado_indica_mudanca(self, campo: str) -> None:
-        antes = {"Id": 1, "UpdateDate": 1, "UpdatedBy": "a", "ConfigHash": "h",
-                 "Status": 1, "ProjectPath": "/p"}
-        agora = {**antes, campo: "diferente"}
-        assert stack_mudou(antes, agora) is True
-
-    def test_nada_mudado(self) -> None:
-        s = {"Id": 1, "UpdateDate": 1, "UpdatedBy": "a"}
-        assert stack_mudou(s, dict(s)) is False
-
-    def test_primeira_vista_e_mudanca(self) -> None:
-        assert stack_mudou(None, {"Id": 1}) is True
+# `resource_control_users` e `stack_mudou` foram REMOVIDOS em marcoes de 2026.
+# Ambos tinham teste e nenhuma chamada em `src/`: a resolucao de dono usa os
+# LABELS do container (`donos.dono_da_stack`) e a deteccao de mudanca de stack e
+# feita inline em `stacks.StackCollector._processar`. Ver ADR D32.
 
 
 def _mock_n8n_base() -> None:

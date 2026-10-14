@@ -15,6 +15,7 @@ import structlog
 
 from ..config.schema import PollingConfig, ThresholdsConfig
 from ..sources.n8n.client import N8NApiError
+from ..sources.powerautomate.desktop import STATUS_SUCESSO as STATUS_SUCESSO_DESKTOP
 from ..store.repository import EventRecord
 
 log = structlog.get_logger(__name__)
@@ -24,9 +25,13 @@ MARGEM_SEGUNDOS = 5.0
 
 def espera_em_segundos(event_type: str, polling: PollingConfig) -> float:
     """Quanto o alerta espera: 1 ciclo da fonte, para a reconferencia ver dado novo.
+
+    Com teto: espera + 1 tick da fila nao passa de `queue_max_delay_seconds`. Fonte
+    de 60 s e reconferida antes do proximo ciclo dela -- o preco do alerta em 50 s.
     Fatos (nada a resolver) saem sem espera."""
     ciclo = {
         "execution_failed": polling.execution_errors_seconds,
+        "desktop_flow_failed": polling.execution_errors_seconds,
         "container_stopped": polling.container_state_seconds,
         "container_unhealthy": polling.container_state_seconds,
         "container_removed": polling.container_state_seconds,
@@ -35,7 +40,10 @@ def espera_em_segundos(event_type: str, polling: PollingConfig) -> float:
         "workflow_activated": polling.workflow_full_seconds,
         "workflow_deactivated": polling.workflow_full_seconds,
     }.get(event_type)
-    return ciclo + MARGEM_SEGUNDOS if ciclo else 0.0
+    if not ciclo:
+        return 0.0
+    teto = polling.queue_max_delay_seconds - polling.queue_seconds
+    return min(ciclo + MARGEM_SEGUNDOS, teto)
 
 
 def _instante(texto: str | None) -> datetime | None:
@@ -46,8 +54,10 @@ def _instante(texto: str | None) -> datetime | None:
 
 
 class ResolutionChecker:
-    def __init__(self, *, containers: Any, resources: Any, n8n: Any, repo: Any, limites: ThresholdsConfig) -> None:
+    def __init__(self, *, containers: Any, resources: Any, n8n: Any, repo: Any, limites: ThresholdsConfig,
+                 desktop: Any = None) -> None:
         self.containers, self.resources, self.n8n, self.repo, self.limites = containers, resources, n8n, repo, limites
+        self.desktop = desktop
 
     async def motivo(self, evento: EventRecord) -> str | None:
         """Motivo do descarte (o problema passou) ou None (continua: enviar)."""
@@ -91,6 +101,14 @@ class ResolutionChecker:
         inicio = _instante((ultima or {}).get("startedAt"))
         if ultima and ultima.get("status") == "success" and falha and inicio and inicio > falha:
             return "execucao posterior com sucesso"
+        return None
+
+    async def _desktop_flow_failed(self, e: EventRecord) -> str | None:
+        """Ultimo estado visto pelo coletor de RPA: sucesso DEPOIS da falha resolve."""
+        estado = self.desktop.estado.get(e.resource_id) if self.desktop else None
+        falha = _instante(e.detail.get("ultima_falha_ts"))
+        if estado and falha and estado[0] == STATUS_SUCESSO_DESKTOP and estado[1] > falha:
+            return "execucao posterior do RPA com sucesso"
         return None
 
     async def _workflow_toggle(self, e: EventRecord) -> str | None:

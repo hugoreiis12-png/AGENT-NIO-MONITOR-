@@ -22,10 +22,10 @@ import pytest
 
 from .dsn_teste import dsn_de_teste
 
+from agent_nio_monitor.store.memory_repository import InMemoryRepository
 from agent_nio_monitor.store.repository import (
     ExecutionRecord,
     FailureRecord,
-    InMemoryRepository,
 )
 
 pytest.importorskip("psycopg")

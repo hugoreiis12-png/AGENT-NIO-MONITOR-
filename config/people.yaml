@@ -23,9 +23,18 @@ projects:
   
 
 # Se o projectId nao estiver no mapa acima e nem na API, quem recebe.
-# Deixar VAZIO e melhor do que errar: o agente registra 'sem destinatario'
-# e isso aparece no log com evidencia, em vez de mandar alerta para o lugar errado.
-global: []
+#
+# Este e o ULTIMO degrau, e hoje ele e alcancado com frequencia: a chave do
+# agente nao tem papel admin, entao `GET /api/v1/projects` responde 403 e o
+# `resolver` cai no `projects:` para TODOS os alertas -- nao so para os
+# desconhecidos. Um quarto projeto nasado entraria aqui sem ninguem.
+#
+# Cobre tambem os eventos sem `tenant_id`, entre eles o `reconciliation_gap`:
+# buraco de reconciliacao nao pertence a projeto nenhum, e sem este endereco ele
+# seria perdido. Foi esse o furo que a auditoria encontrou -- regra, template e
+# ADR existiam, e nenhum emissor.
+global:
+  - hugo.reis@grupocampanha.com.br
 
 # Pessoa -> e-mail. Vale para usuario do Portainer (CreatedBy/UpdatedBy) e para o
 # autor de workflow no n8n (activeVersion.authors). Quem nao esta aqui NAO e
@@ -36,6 +45,14 @@ usuarios:
   elton: elton.canto@grupocampanha.com.br
   hugo: hugo.reis@grupocampanha.com.br
   rafael barboza: rafael.barboza@grupocampanha.com.br
+
+# Destinatario EXCLUSIVO por fonte: todo alerta da fonte vai SO para esta lista
+# (ignora dono, projeto e `global`). O dono dos fluxos de RPA e a conta tecnica
+# NaturalFarms@rpanf.onmicrosoft.com, que ninguem le.
+fontes:
+  powerautomate:
+    - rafael.barboza@grupocampanha.com.br
+    - carlos.henrique@grupocampanha.com.br
 
 # Destinatario EXCLUSIVO por workflow (id): ignora projeto e autor.
 workflows:

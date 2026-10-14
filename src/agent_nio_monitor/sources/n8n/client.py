@@ -60,6 +60,21 @@ def _deve_retryar(exc: BaseException) -> bool:
     return False
 
 
+def _n8n_responde(exc: BaseException) -> bool:
+    """O n8n esta de pe, independente do retry? Reutiliza o mesmo juizo de `_deve_retryar`.
+
+    Mesma politica, resposta diferente: uma falha que MERECE retentativa e
+    exatamente a que significa "o n8n nao esta responding agora". Reutilizar a
+    funcao evita duas listas de status que divergem -- e divergir aqui daria o
+    pior resultado: o agenteInsetsiste e porem reporta o n8n como de pe.
+
+    4xx NAO conta como fora: chave invalida (401) ou falta de permissao (403) e
+    problema de credencial, e o n8n esta perfeitamente de pe para atender quem
+    tem acesso.
+    """
+    return _deve_retryar(exc)
+
+
 class N8NClient:
     def __init__(
         self,
@@ -74,6 +89,11 @@ class N8NClient:
         self.base_url = base_url.rstrip("/")
         self.page_size = page_size
         self.max_pages = max_pages
+        # Alcancabilidade observada. Comeca otimista porque `None` (nunca falhou)
+        # e indistinguivel de "de pe" para quem so precisa decidir se usa e-mail
+        # ou log -- e ate a primeira resposta chegar, o n8n quase sempre esta de pe.
+        # Quem mirror no `HealthState` e o `Agent`, depois de cada ciclo.
+        self.alive: bool = True
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"X-N8N-API-KEY": api_key, "Accept": "application/json"},
@@ -102,7 +122,13 @@ class N8NClient:
         try:
             resp = await self._client.get(path, params=params)
         except httpx.HTTPError as exc:
+            self.alive = False
             raise N8NApiError(f"erro de rede em {path}: {type(exc).__name__}") from exc
+
+        # Qualquer resposta HTTP chegou: o n8n respondeu. A distincao de 4xx vem
+        # abaixo, onde 401/403 significam problema de credencial, nao queda.
+        if resp.status_code < 500:
+            self.alive = True
 
         if resp.status_code in (401, 403):
             # 401 e 403 sao diagnosticos diferentes e a distincao importa: 401
@@ -131,18 +157,12 @@ class N8NClient:
                 f"400 em {path}: {resp.text[:200]}", 400
             )
         if resp.status_code >= 500:
+            self.alive = False
             raise N8NApiError(f"{resp.status_code} em {path}", resp.status_code)
         if resp.status_code == 404:
             raise CursorInvalid(f"404 em {path}: recurso removido", 404)
         resp.raise_for_status()
         return resp.json()
-
-    async def version(self) -> str | None:
-        try:
-            data = await self._get("/healthz")
-            return str(data.get("version"))
-        except N8NApiError:
-            return None
 
     # ------------------------------------------------------------ paginacao
 
@@ -168,14 +188,38 @@ class N8NClient:
         cursor: str | None = None,
         include_data: bool = False,
     ) -> Iterator[dict[str, Any]]:
+        async for page in self.iter_executions_pages(
+            status=status, workflow_id=workflow_id, cursor=cursor, include_data=include_data
+        ):
+            for item in page.get("data", []):
+                yield item
+
+    async def iter_executions_pages(
+        self,
+        *,
+        status: str | None = "error",
+        workflow_id: str | None = None,
+        cursor: str | None = None,
+        include_data: bool = False,
+    ) -> Iterator[dict[str, Any]]:
+        """Paginas cruas de `/executions`, com `nextCursor`.
+
+        Publico porque o coletor PRECISA do `nextCursor`: e ele que vira o cursor
+        de retomada gravado em `source_cursor`. `iter_executions()` achata a
+        pagina e perde esse campo, entao o coletor acabava chamando o PRIVADO
+        `_iter_pages` e acorrentando o coletor mais critico do agente ao
+        detalhe interno de paginacao deste modulo.
+
+        Qualquer refatoracao de `_iter_pages` quebraria o coletor silenciosamente
+        -- que e a razao de o acesso privado ter virado metodo publico aqui.
+        """
         params: dict[str, Any] = {"includeData": "true" if include_data else "false"}
         if status:
             params["status"] = status
         if workflow_id:
             params["workflowId"] = workflow_id
         async for page in self._iter_pages("/api/v1/executions", params, cursor):
-            for item in page.get("data", []):
-                yield item
+            yield page
 
     async def iter_workflows(
         self,
@@ -199,6 +243,19 @@ class N8NClient:
     async def get_workflow(self, workflow_id: str) -> dict[str, Any]:
         return await self._get(f"/api/v1/workflows/{workflow_id}")
 
+    async def iter_credentials(self) -> Iterator[dict[str, Any]]:
+        """Credenciais do n8n, paginadas.
+
+        Publico porque `CredentialCollector` precisa de todas, e nao so da
+        pagina 1. O campo `shared` traz e-mail de quem tem acesso -- o coletor
+        guarda APENAS `id`, `name`, `type` e `updatedAt`, e joga `shared`
+        fora. Nao ha o que redactar: o dado sensivel nunca chega a ser
+        guardado.
+        """
+        async for page in self._iter_pages("/api/v1/credentials", {}):
+            for item in page.get("data", []):
+                yield item
+
     async def workflow_history(self, workflow_id: str) -> list[dict[str, Any]] | None:
         """Existe a partir de certa versao. O capability probe decide se chama.
         Retorna None quando ausente -- nao lanca, porque ausencia e um cenario
@@ -221,9 +278,6 @@ class N8NClient:
 
     async def list_users(self) -> list[dict[str, Any]]:
         return list((await self._get("/api/v1/users")).get("data", []))
-
-    async def list_credentials(self) -> list[dict[str, Any]]:
-        return list((await self._get("/api/v1/credentials")).get("data", []))
 
     async def last_execution(self, workflow_id: str) -> dict[str, Any] | None:
         """Execucao mais recente do workflow, de qualquer status (sem o payload)."""

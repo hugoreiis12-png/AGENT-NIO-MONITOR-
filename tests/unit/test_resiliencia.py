@@ -50,6 +50,97 @@ class TestPoliticaDeRetry:
         assert _deve_retryar(N8NApiError("x", status)) is False
         assert _pt_retryar(PortainerApiError("x", status)) is False
 
+
+class TestAlcancabilidadeDoN8N:
+    """`N8NClient.alive` alimenta `health.n8n_up`, que decide o canal (D8).
+
+    Antes o campo nunca era atribuido fora de teste, e o `/healthz` portanto
+    nunca devolvia 503 por n8n fora -- o dead-man's switch do runbook ficava
+    cego justo no incidente que ele existe para pegar.
+    """
+
+    @respx.mock
+    @pytest.mark.parametrize("status", [500, 502, 503])
+    async def test_5xx_marca_n8n_fora(self, status: int) -> None:
+        respx.get(f"{N8N}/api/v1/executions").mock(return_value=httpx.Response(status, json={}))
+        async with N8NClient(N8N, "k") as c:
+            assert c.alive is True  # otimista ate a primeira resposta
+            with pytest.raises(N8NApiError):
+                await c._get("/api/v1/executions")
+            assert c.alive is False
+
+    @respx.mock
+    async def test_erro_de_rede_marca_n8n_fora(self) -> None:
+        respx.get(f"{N8N}/api/v1/executions").mock(side_effect=httpx.ConnectError("recusou"))
+        async with N8NClient(N8N, "k") as c:
+            with pytest.raises(N8NApiError):
+                await c._get("/api/v1/executions")
+            assert c.alive is False
+
+    @respx.mock
+    async def test_resposta_valida_marca_n8n_de_pe(self) -> None:
+        respx.get(f"{N8N}/api/v1/executions").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        async with N8NClient(N8N, "k") as c:
+            await c._get("/api/v1/executions")
+            assert c.alive is True
+
+    @respx.mock
+    @pytest.mark.parametrize("status", [401, 403, 404])
+    async def test_4xx_nao_marca_n8n_fora(self, status: int) -> None:
+        """Credencial ruim e o n8n de pe. Confundir os dois faria o agente
+        parar de mandar e-mail por causa de um token expirado -- o alerta sumiria
+        exatamente quando o n8n precisa de atencao."""
+        respx.get(f"{N8N}/api/v1/executions").mock(return_value=httpx.Response(status, json={}))
+        async with N8NClient(N8N, "k") as c:
+            with pytest.raises(N8NApiError):
+                await c._get("/api/v1/executions")
+            assert c.alive is True
+
+    @respx.mock
+    async def test_recuperacao_depois_de_5xx(self) -> None:
+        """5xx e transitório: a queda tem que ter fim, senao o alerta fica
+        preso no canal de log depois que o n8n volta."""
+        rota = respx.get(f"{N8N}/api/v1/executions")
+        rota.mock(return_value=httpx.Response(503, json={}))
+        async with N8NClient(N8N, "k") as c:
+            with pytest.raises(N8NApiError):
+                await c._get("/api/v1/executions")
+            assert c.alive is False
+
+            rota.mock(return_value=httpx.Response(200, json={"data": []}))
+            await c._get("/api/v1/executions")
+            assert c.alive is True
+
+
+class TestSaude503PorN8nFora:
+    async def test_healthz_503_quando_o_n8n_some(self) -> None:
+        """O endpoint precisa distinguir "vivo" de "vivo mas cego" -- foi essa
+        distincao que o `n8n_up` nunca populado apagou."""
+        estado = HealthState()
+        estado.mark("n8n_executions", True)
+        assert estado.n8n_up is None
+
+        estado.mark_n8n(False)
+        assert estado.n8n_up is False
+        assert estado.snapshot(timedelta(minutes=10))["n8n_up"] is False
+
+    async def test_mark_n8n_e_independente_de_mark_por_fonte(self) -> None:
+        """`mark` diz que a COLETA deu certo; `mark_n8n` diz que o n8n atendeu.
+        Uma coleta que falha por outro motivo nao pode derrubar o n8n_up, nem
+        um n8n fora pode apagar a contagem de erro da fonte."""
+        estado = HealthState()
+        estado.mark("n8n_executions", False)
+        estado.mark_n8n(True)
+        assert estado.collect_errors["n8n_executions"] == 1
+        assert estado.n8n_up is True
+
+        estado.mark_n8n(False)
+        estado.mark("n8n_executions", True)
+        assert estado.n8n_up is False
+        assert estado.collect_errors["n8n_executions"] == 0
+
     def test_cursor_invalido_nunca_repite(self) -> None:
         exc = CursorInvalid("cursor morto", 404)
         assert _deve_retryar(exc) is False

@@ -13,6 +13,13 @@ from __future__ import annotations
 import os
 import pathlib
 
+import pytest
+from tenacity import wait_none
+
+from agent_nio_monitor.sources.n8n.client import N8NClient
+from agent_nio_monitor.sources.portainer.client import PortainerClient
+from agent_nio_monitor.sources.powerautomate.client import DataverseClient
+
 RAIZ = pathlib.Path(__file__).resolve().parents[1]
 ARQ_ENV = RAIZ / ".env"
 
@@ -29,3 +36,10 @@ def _carrega_dotenv() -> None:
 
 
 _carrega_dotenv()
+
+
+@pytest.fixture(autouse=True)
+def _retry_sem_espera(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mantem as 3 tentativas, mas sem o backoff real: so o numero de tentativas e contrato."""
+    for metodo in (N8NClient._get, PortainerClient._get, DataverseClient.get):
+        monkeypatch.setattr(metodo.retry, "wait", wait_none())

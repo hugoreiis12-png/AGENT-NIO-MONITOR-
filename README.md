@@ -15,7 +15,8 @@ o responsável certo.
 
 ## Status atual
 
-**476 testes passando**, lint limpo, cobertura de 72%.
+**1330 testes passando** (+3 do LLM, pulados com `SKIP_LLM_TESTS=1`), lint limpo, cobertura de **93%**.
+Suíte completa em ~18 s (sem cobertura). Nenhum arquivo de `src/` passa de 300 linhas.
 
 | Ticket | Entrega | Estado |
 |---|---|---|
@@ -23,9 +24,9 @@ o responsável certo.
 | T2 | Coleta por cursor + detector de buraco + redator | OK |
 | T3 | Streak + motor de regras + destinatarios | OK |
 | T4 | LLM redige + templates de email | OK |
-| T5 | Diff estrutural de workflow (funcao) | FALTA ligar na agenda |
-| T6 | Cliente Portainer (funcao) | FALTA ligar na agenda |
-| T7 | HealthServer + dead-man's switch (funcao) | FALTA instalar o cron |
+| T5 | Diff estrutural de workflow | OK — job `workflows_full` |
+| T6 | Cliente Portainer | OK — jobs `containers_*` e `stacks` |
+| T7 | HealthServer + dead-man's switch | HealthServer OK; FALTA instalar o cron externo |
 
 ### Bugs achados e corrigidos na auditoria
 
@@ -103,8 +104,12 @@ $env:SKIP_LLM_TESTS="1"; .\.\.venv\Scripts\python.exe -m pytest -q   # sem LLM
   chave não repete dentro da janela de re-notificação da regra). Falha de envio reagenda
   (30/60/120/240 s) e desiste após 5 tentativas. Fatos (workflow/stack alterados) não têm o que
   resolver e saem no primeiro ciclo. `/healthz` mostra `queue.pending`.
-- **Tempos:** todo ciclo entre 25 e 60 s (erros e containers 30 s; workflows, stacks e consumo
-  60 s; fila 30 s). Valores fora disso são recusados no boot (`PollingConfig`).
+- **Tempos:** coleta entre 25 e 60 s (erros e containers 30 s; workflows, stacks e consumo
+  60 s). A fila gira a cada **10 s** (5–25 s) e o alerta sai em **até 50 s** depois de entrar
+  nela (`queue_max_delay_seconds`): a espera de reconferência é 1 ciclo da fonte + 5 s, com
+  teto de 50 − 10 = 40 s. Fontes de 60 s (consumo, ativação de workflow) são reconferidas antes
+  do próximo ciclo delas — o preço do alerta em 50 s. O tempo de redação do LLM (~4 s medido)
+  vem depois disso. Valores fora das faixas são recusados no boot (`PollingConfig`).
 - **E-mail HTML com a arte JFC:** `notify/html/` (vermelho = CRÍTICO/ALTO, amarelo = MÉDIO,
   verde = BAIXO/INFO). As imagens ficam em `assets/email/`, geradas por
   `scripts/recortar_arte.py` a partir do tríptico em `assets/`, e servidas pelo GitHub
@@ -125,21 +130,13 @@ Estes testes usam **dados reais** da sua instância, não inventados:
 
 ## O que Não está verificado
 
-**O banco real.** Docker não está disponível nesta máquina, então o DDL foi
-validado com `pglast` (parser do próprio PostgreSQL) — pega erro de sintaxe,
-tipo inválido, índice sobre coluna inexistente. **Não** pega FK entre tabela
-particionada, colisão de nome de partição, nem comportamento em volume.
+**Verificado agora:** com `DATABASE_DSN_TEST` no `.env`, as suítes de `tests/integration/` rodam contra o
+Postgres de teste (`hermes_test`) — inclusive a paridade InMemory × Postgres do streak
+(`test_paridade_postgres.py`) e das escritas de catálogo (`test_paridade_catalogo.py`).
+`postgres_queue.py` e `postgres_records.py` estão em 100%.
 
-Antes de subir, rode uma vez com Postgres de verdade:
-
-```powershell
-$env:DATABASE_DSN="postgresql://usuario:senha@host:5432/hermes"
-.\.venv\Scripts\python.exe -m agent_nio_monitor.main doctor
-```
-
-`store/postgres_repository.py` e `store/db.py` têm **0% de cobertura** porque
-dependem de banco. Antes do primeiro deploy, rode `tests/integration/test_postgres_live.py`
-(ele pula sozinho se não houver DSN).
+**Ainda não** verificado: comportamento em volume (partições cheias, `drop_partitions_older_than`
+com meses de dado).
 
 ---
 
@@ -149,7 +146,7 @@ dependem de banco. Antes do primeiro deploy, rode `tests/integration/test_postgr
 |---|---|
 | **Silêncio** | Se o n8n cai, o alerta vai para log (decisão do dono). **Precisa de consumidor** — ver `docs/runbook.md` |
 | **Atribuição** | `activeVersion.authors` existe na sua instância e é lido. Se o `doctor` mostrar `versioning: nao`, a autoria volta a ser indisponível |
-| **Bandwidth** | Poll de corpo completo a 15 min ≈ 1 GB/dia em LAN. Se passar a 5 min, o alerta de banda entra sozinho |
+| **Bandwidth** | Corpo completo dos workflows a cada 60 s (11,2 MB por leitura) ≈ **16 GB/dia** em LAN — custo aceito pelo dono para a edição chegar em até 1 min (ver ADR D6) |
 | **Fadiga** | Política entrega ~11 emails para 25 erros em 25h (piso de 8: um por workflow quebrado). Monitorar taxa de falso positivo |
 
 Ver `docs/runbook.md` para operação e `docs/adr/` para o porquê de cada decisão.

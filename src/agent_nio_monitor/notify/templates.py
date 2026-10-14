@@ -27,13 +27,15 @@ SEV_LABEL = {
 SUBJECT = {
     "workflow_failing": "[{sev}] {nome} falhou {n}x em {min}min",
     "execution_failed": "[{sev}] {nome} falhou",
+    "desktop_flow_failing": "[{sev}] RPA {nome} falhou {n}x seguidas",
+    "desktop_flow_failed": "[{sev}] RPA {nome} falhou",
     "workflow_changed": "[{sev}] {nome} foi alterado",
     "workflow_deactivated": "[{sev}] {nome} foi DESATIVADO",
     "workflow_activated": "[{sev}] {nome} foi ativado",
     "credential_updated": "[{sev}] Credencial alterada: {nome}",
     "container_down": "[{sev}] Container parado: {nome}",
     "restart_loop": "[{sev}] {nome} em loop de reinicio",
-    "reconciliation_gap": "[{sev}] Falha na coleta -- buraco de {min}min",
+    "reconciliation_gap": "[{sev}] Buraco na coleta de execucoes do n8n",
     "source_down": "[{sev}] {fonte} indisponivel",
     "workflow_created": "[{sev}] {nome} foi criado",
     "stack_changed": "[{sev}] Stack {nome} foi alterada",
@@ -103,6 +105,11 @@ ACAO_PADRAO = {
         "nao incidente."
     ),
     "execution_failed": "Abrir a execucao no n8n e ver o erro completo.",
+    "desktop_flow_failing": (
+        "Abrir o Power Automate em Monitorar > Execucoes de fluxo da area de trabalho e ver o erro. "
+        "Erro de logon (WindowsIdentityIncorrect) e conexao da maquina com usuario ou senha errados."
+    ),
+    "desktop_flow_failed": "Abrir o Power Automate em Monitorar > Execucoes de fluxo da area de trabalho e ver o erro.",
     "workflow_changed": "Conferir se a mudanca era esperada e o que mais mudou junto.",
     "workflow_deactivated": "Confirmar com quem desativou e reativar se foi engano.",
     "workflow_activated": "Nada a fazer. Registro para auditoria.",
@@ -220,7 +227,7 @@ def render(
         corpo = corpo_com_analise(contexto, acao, d["url_workflow"])
         return assunto, f"{cabecalho}\n{corpo}{quem}".strip()
 
-    if template in ("workflow_failing", "execution_failed"):
+    if template in ("workflow_failing", "execution_failed", "desktop_flow_failing", "desktop_flow_failed"):
         corpo = _BODY_EXEC.format(**d)
     elif template == "workflow_changed":
         corpo = _BODY_CHANGED.format(**d)
@@ -237,6 +244,8 @@ def _quem_mexeu(contexto: dict, template: str) -> str:
         linhas.append(f"Stack: {contexto['stack']}")
     if contexto.get("responsavel_stack"):
         linhas.append(f"Responsavel pela stack: {contexto['responsavel_stack']}")
+    if contexto.get("responsavel_fluxo"):
+        linhas.append(f"Responsavel pelo fluxo: {contexto['responsavel_fluxo']}")
     if contexto.get("autor") and template != "workflow_changed":
         linhas.append(f"Ultima alteracao por: {contexto['autor']}")
     if not linhas:

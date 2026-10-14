@@ -10,7 +10,8 @@ import pytest
 from agent_nio_monitor.config.schema import PollingConfig, ThresholdsConfig
 from agent_nio_monitor.notify.resolution import ResolutionChecker, espera_em_segundos
 from agent_nio_monitor.sources.n8n.client import N8NApiError
-from agent_nio_monitor.store.repository import EventRecord, InMemoryRepository
+from agent_nio_monitor.store.repository import EventRecord
+from agent_nio_monitor.store.memory_repository import InMemoryRepository
 
 T0 = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)
 LIMITES = ThresholdsConfig(cpu_host_pct=80, mem_pct=90)
@@ -152,8 +153,19 @@ class TestEspera:
         p = PollingConfig()
         assert espera_em_segundos("execution_failed", p) == 35
         assert espera_em_segundos("container_stopped", p) == 35
-        assert espera_em_segundos("container_resource_high", p) == 65
-        assert espera_em_segundos("workflow_activated", p) == 65
+
+    def test_fonte_lenta_e_cortada_no_teto(self) -> None:
+        p = PollingConfig()
+        assert espera_em_segundos("container_resource_high", p) == 40
+        assert espera_em_segundos("workflow_activated", p) == 40
+
+    @pytest.mark.parametrize("tipo", [
+        "execution_failed", "container_stopped", "container_unhealthy", "container_removed",
+        "container_restart_loop", "container_resource_high", "workflow_activated", "workflow_deactivated",
+    ])
+    def test_espera_mais_um_tick_nunca_passa_de_50s(self, tipo: str) -> None:
+        p = PollingConfig()
+        assert espera_em_segundos(tipo, p) + p.queue_seconds <= 50
 
     def test_fatos_saem_sem_espera(self) -> None:
         p = PollingConfig()

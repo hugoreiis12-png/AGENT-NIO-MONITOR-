@@ -52,11 +52,7 @@ class ExecutionErrorCollector:
         next_cursor: str | None = cursor
 
         try:
-            async for page in self.client._iter_pages(
-                "/api/v1/executions",
-                {"status": "error", "includeData": "false"},
-                cursor,
-            ):
+            async for page in self.client.iter_executions_pages(include_data=False, cursor=cursor):
                 next_cursor = page.get("nextCursor") or next_cursor
                 for raw in page.get("data", []):
                     await self._process(raw, novos, falhas, vistos, name_by_id or {})
@@ -128,7 +124,18 @@ class ExecutionErrorCollector:
             failures=len(falhas),
             gap=gap,
             duration_ms=int((now_utc() - inicio).total_seconds() * 1000),
-            extra={"streaks": streaks, "ultimos_erros": _ultimo_erro_por_workflow(falhas)},
+            extra={
+                "streaks": streaks,
+                "ultimos_erros": _ultimo_erro_por_workflow(falhas),
+                # Mesmos numeros que `record_reconciliation` gravou, para o
+                # alerta de buraco dizer QUANTO se perdeu sem nova chamada a API.
+                "reconciliation": {
+                    "esperados": len(vistos),
+                    "vistos": len(novos),
+                    "gaps": 1 if gap else 0,
+                    "cursor_valido": not gap,
+                },
+            },
         )
 
     async def _varredura_completa(
@@ -145,9 +152,7 @@ class ExecutionErrorCollector:
         """
         proximo: str | None = None
         try:
-            async for page in self.client._iter_pages(
-                "/api/v1/executions", {"status": "error", "includeData": "false"}, None
-            ):
+            async for page in self.client.iter_executions_pages(include_data=False, cursor=None):
                 proximo = page.get("nextCursor") or proximo
                 for raw in page.get("data", []):
                     await self._process(raw, novos, falhas, vistos, names)

@@ -16,6 +16,10 @@ environments:
       api_key_env: "PORTAINER_API_KEY"
       verify_ssl: false
       timeout_seconds: 30
+    # Power Automate via Dataverse (service principal nio-fabric-sp, so leitura).
+    # "URL do ambiente" do Power Platform admin center (credencial em POWERAUTOMATE_* no .env).
+    powerautomate:
+      dataverse_url: "https://org7dd46aa7.crm2.dynamics.com"
 
 active_environment: production
 
@@ -30,7 +34,8 @@ polling:
   container_state_seconds: 30
   container_stats_seconds: 60
   stack_changes_seconds: 60
-  queue_seconds: 30              # fila de disparo: reconfere e envia
+  queue_seconds: 10              # fila de disparo: reconfere e envia (nao le as fontes)
+  queue_max_delay_seconds: 50    # alerta sai em ate 50 s depois de entrar na fila
   reconciliation_seconds: 3600
   digest_hour: 9
   health_seconds: 30

@@ -46,7 +46,11 @@ ENDPOINTS: tuple[tuple[str, str, str, bool], ...] = (
     ("portainer", "GET", "/api/users", "users", False),
 )
 
+# Fan-out da sonda. Suficiente para 11 rotas em rede interna sem abrir 11
+# conexoes de uma vez, e suficiente para nao serializar o boot.
+CONCORRENCIA = 6
 
+# Classe para reportar resultado de sonda de capacidades
 @dataclass(frozen=True)
 class Capability:
     source: str
@@ -82,7 +86,7 @@ class CapabilityReport:
             for c in self.items
         ]
 
-
+# Funções auxiliares para sondar endpoints e resumir resultados 
 def _summarise(status: int, path: str = "") -> str:
     """401 e 403 NAO sao o mesmo problema, e dizer que sao custou uma ida ao
     cadastro de usuario na porta errada.
@@ -150,12 +154,22 @@ async def probe_n8n(base_url: str, api_key: str) -> CapabilityReport:
         except httpx.HTTPError as exc:
             log.warning("n8n_healthz_falhou", erro=type(exc).__name__)
 
-        for source, method, path, feature, required in ENDPOINTS:
-            if source != "n8n":
-                continue
-            status, detail = await _probe_one(client, base_url, source, method, path)
+        # Paralelo, e nao em laco: 11 rotas x 10 s de timeout sao ate 110 s se
+        # sequencial -- e a sonda roda no boot, entao esse tempo atrasa o
+        # primeiro ciclo de coleta. `CONCORRENCIA` limita o fan-out, que numa
+        # rede interna nao precisa chegar a 11 de uma vez.
+        rotas_n8n = [e for e in ENDPOINTS if e[0] == "n8n"]
+        # Semaforo LOCAL, nao de modulo: `asyncio.Semaphore` se prende ao event
+        # loop que o usou primeiro, e cada teste roda no seu proprio loop. Um
+        # semaforo de modulo reused entre loops e a forma de um "attached to a
+        # different loop" que so aparece em um dos testes.
+        sem = asyncio.Semaphore(CONCORRENCIA)
+
+        async def _uma(rota) -> None:  # noqa: ANN001
+            source, method, path, feature, required = rota
+            async with sem:
+                status, detail = await _probe_one(client, base_url, source, method, path)
             # 400 em rota parametrizada = rota existe, id de teste nao.
-            available = status in (200, 400, 405)
             report.items.append(
                 Capability(
                     source=source,
@@ -163,11 +177,13 @@ async def probe_n8n(base_url: str, api_key: str) -> CapabilityReport:
                     path=path,
                     feature=feature,
                     required=required,
-                    available=available,
+                    available=status in (200, 400, 405),
                     status_code=status,
                     detail=detail or _summarise(status, path),
                 )
             )
+
+        await asyncio.gather(*(_uma(rota) for rota in rotas_n8n))
     return report
 
 
@@ -176,10 +192,12 @@ async def probe_portainer(base_url: str, api_key: str) -> CapabilityReport:
     headers = {"X-API-Key": api_key, "Accept": "application/json"}
     report = CapabilityReport(source="portainer")
     async with httpx.AsyncClient(headers=headers, verify=False) as client:
-        for source, method, path, feature, required in ENDPOINTS:
-            if source != "portainer":
-                continue
-            status, detail = await _probe_one(client, base_url, source, method, path)
+        sem = asyncio.Semaphore(CONCORRENCIA)
+
+        async def _uma(rota) -> None:  # noqa: ANN001
+            source, method, path, feature, required = rota
+            async with sem:
+                status, detail = await _probe_one(client, base_url, source, method, path)
             report.items.append(
                 Capability(
                     source=source,
@@ -192,7 +210,32 @@ async def probe_portainer(base_url: str, api_key: str) -> CapabilityReport:
                     detail=detail or _summarise(status, path),
                 )
             )
+
+        await asyncio.gather(*(_uma(rota) for rota in ENDPOINTS if rota[0] == "portainer"))
     return report
+
+
+def fontes_do_config(cfg) -> dict[str, dict[str, str]]:  # noqa: ANN001 - AppConfig
+    """Credenciais discoveries para sondar, a partir da config ativa.
+
+    Fica aqui, e nao em `main.py`, porque `doctor` e o boot do agente precisam
+    da MESMA montagem. Antes cada um fazia a sua, e o boot nao sondava nada --
+    `save_capabilities` nunca era chamado fora de teste.
+    """
+    import os
+
+    env = cfg.active
+    fontes: dict[str, dict[str, str]] = {}
+    if os.environ.get(env.n8n.api_key_env):
+        fontes["n8n"] = {"url": env.n8n.url, "api_key": os.environ[env.n8n.api_key_env]}
+    if env.portainer and os.environ.get(env.portainer.api_key_env):
+        fontes["portainer"] = {
+            # `PORTAINER_URL` sobrescreve SO no doctor: permite sondar um
+            # endereco alternativo sem editar a config versionada.
+            "url": os.environ.get("PORTAINER_URL", env.portainer.url),
+            "api_key": os.environ[env.portainer.api_key_env],
+        }
+    return fontes
 
 
 async def detect(
@@ -231,49 +274,3 @@ async def detect(
                 "capability_core_ausente", fonte=cap.source, path=cap.path, detalhe=cap.detail
             )
     return reports
-
-
-def render_table(report: CapabilityReport) -> str:
-    """Saida humana do boot -- e a evidencia que responde 'o que a instancia expoe?'.
-
-    Sobre a versao: eu afirmei antes que `GET /healthz` devolvia
-    `{"status":"ok","version":"1.x.y"}`. NAO E VERDADE nesta instalacao --
-    verificado, devolve so `{"status":"ok"}`, e a UI nao tem versao no HTML.
-
-    Por isso a versao e um campo OPCIONAL. O que decide o comportamento do agente
-    e a deteccao de CAPACIDADES (quais endpoints existem), que e medida de
-    verdade. Ausencia de versao e registrada, nunca estimada.
-    """
-    linhas = [
-        "fonte      feature       rota                                        disp  detalhe",
-        "-" * 96,
-    ]
-    for src, feat, path, ok, detail in report.as_rows():
-        linhas.append(f"{src:<11} {feat:<13} {path:<43} {'SIM' if ok else 'nao':<5} {detail}")
-    linhas.append("-" * 96)
-    if report.source != "n8n":
-        # A nota de versao e sobre o n8n. Repetir no Portainer (que nem tem
-        # /healthz na sonda) produz texto que nao se aplica.
-        return "\n".join(linhas)
-    if report.n8n_version:
-        linhas.append(f"VERSAO REPORTADA PELO N8N: {report.n8n_version}")
-    else:
-        linhas.append(
-            "VERSAO: nao exposta por esta instancia (/healthz devolve so status).\n"
-            "        Decisao por CAPACIDADES acima, que e medida -- e nao estimada."
-        )
-    return "\n".join(linhas)
-
-
-def capability_rows(report: CapabilityReport) -> list[dict[str, Any]]:
-    return [
-        {
-            "source": c.source,
-            "feature": c.feature,
-            "path": c.path,
-            "available": c.available,
-            "status_code": c.status_code,
-            "detail": c.detail,
-        }
-        for c in report.items
-    ]

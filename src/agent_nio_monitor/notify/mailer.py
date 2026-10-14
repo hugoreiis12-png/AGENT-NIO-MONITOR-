@@ -149,7 +149,28 @@ def _priority(severity: str) -> str:
 
 class Escalator:
     """Escalacao por conjunto crescente. Cada degrau e um destinatario novo,
-    disparado por 'nao reconhecido em N minutos'."""
+    disparado por 'nao reconhecido em N minutos'.
+
+    **NAO ESTA LIGADA.** Nenhum modulo a instancia em producao; as regras de
+    `policy.yaml` continuam declarando `escalate_after_minutes` e nada as
+    executa. A logica daqui esta correta e testada, mas o gatilho -- re-enfileirar
+    um item ja enviado quando o degrau vence -- nao existe.
+
+    Decisao consciente de NAO ligar agora, por tres motivos concretas:
+      1. Escalacao e a unica capacidade deste agente que MANDA MAIS E-MAIL. O
+         projeto ja registra fadiga como risco (`README.md`, politica entrega ~11
+         e-mails para 25 erros). Ligar antes de resolver o head-of-line do
+         despachante multiplica exatamente o problema que ele causa.
+      2. O gatilho exige estado novo (`escalated_to`) persistido por item --
+         migration 005.
+      3. O gatilho e uma DECISAO DE PRODUTO: quem recebe o degrau 2, e o que
+         acontece quando ninguem reconhece ate o ultimo degrau. Ninguem
+         respondeu isso ainda.
+
+    Ate la, `escalate_after_minutes` e configuracao inerte. Fica assim de forma
+    VISIVEL: `tests/unit/test_escalacao.py` falha se uma regra declarar degraus
+    sem que a decisao esteja registrada no ADR.
+    """
 
     def __init__(self, steps: list[int]) -> None:
         self.steps = sorted(steps)

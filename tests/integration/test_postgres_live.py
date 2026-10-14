@@ -86,6 +86,57 @@ class TestSchema:
         assert tabela.startswith("execution_"), tabela
 
 
+class TestStreakNaoInfla:
+    """Caracteriza o comportamento REAL do contador de streak.
+
+    A auditoria de arquitetura afirmou que `bump_streak` carecia de chave de
+    idempotencia e que um replay de coleta contaria a mesma falha duas vezes --
+    o alerta passaria a dizer "falhou 3x" sobre uma falha so.
+
+    **A afirmacao estava errada.** A idempotencia ja existe, e um nivel acima:
+    `ExecutionErrorCollector._process` so adiciona a `novos` o que
+    `execution_exists()`.instance de ver. Replay de coleta e cursor invalidado
+    passam pelo mesmo filtro e nao chegam em `bump_streak`.
+
+    Foi feita uma correcao com `last_counted_execution_id` em
+    `workflow_streak`, e revertida depois de medida: a coluna so barra
+    repeticao CONSECUTIVA, e um replay de sequencia (10, 11, 12 repetido)
+    somava 6. Dava uma sensacao de protecao que nao existia, mais uma migration.
+
+    Estes testes existem para manter a VERDADE fixa, e para que a proxima pessoa
+    que_release o filtro de `execution_exists` quebre o teste em vez de
+    reintroduzir a coluna. Ver ADR D25.
+    """
+
+    def test_replay_integral_nao_conta_de_novo(self, repo) -> None:
+        agora = datetime.now(UTC)
+        base = ("wf-replay", agora, "proj", "Replay")
+
+        primeira = [repo.bump_streak(*base) for _ in range(3)]
+        assert primeira[-1].count == 3
+
+        replay = [repo.bump_streak(*base) for _ in range(3)]
+        assert replay[-1].count == 6, (
+            "bump_streak NAO e idempotente por design -- a guarda esta na "
+            "triagem do coletor. Se este teste falhar com 9, alguem bypassou "
+            "`execution_exists`."
+        )
+
+    def test_a_guarda_real_e_no_coletor(self, repo) -> None:
+        """O filtro que de fato impede a contagem duplicada."""
+        from agent_nio_monitor.store.repository import ExecutionRecord
+
+        agora = datetime.now(UTC)
+        repo.record_executions(
+            [ExecutionRecord(id=9001, started_at=agora, workflow_id="wf-guard", status="error")]
+        )
+
+        assert repo.execution_exists(9001) is True, (
+            "`execution_exists` e a guarda de idempotencia do streak; sem ela "
+            "todo replay contaria de novo"
+        )
+
+
 class TestRepository:
     def test_ida_e_volta_de_execucao(self, repo) -> None:
         from agent_nio_monitor.store.repository import ExecutionRecord

@@ -1,7 +1,7 @@
 """Resolucao de destinatarios.
 
-Definicao do dono do projeto: responsavel no **n8n** (project) OU no
-**Portainer** (ResourceControl da stack), uniao dos dois.
+Definicao do dono: responsavel no **n8n** (project) somado a quem mexeu no
+recurso (`autor`, ou `responsavel_stack` que o coletor do Portainer resolve).
 
 Ordem de resolucao, com degradacao explicita:
   1. n8n `/projects/{id}/users` + `/users`  (so se a key for owner/admin)
@@ -23,7 +23,7 @@ import structlog
 log = structlog.get_logger(__name__)
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
-CAMPOS_DE_PESSOA = ("autor", "responsavel_stack")
+CAMPOS_DE_PESSOA = ("autor", "responsavel_stack", "responsavel_fluxo")
 
 
 @dataclass
@@ -41,12 +41,14 @@ class RecipientResolver:
         *,
         usuarios: dict[str, str] | None = None,
         exclusivos: dict[str, list[str]] | None = None,
+        por_fonte: dict[str, list[str]] | None = None,
         global_fallback: list[str] | None = None,
         max_recipients: int = 10,
     ) -> None:
         self.client = n8n_client
         self.people = people or {}
         self.exclusivos = exclusivos or {}
+        self.por_fonte = por_fonte or {}
         self.usuarios = {k.lower(): v for k, v in (usuarios or {}).items()}
         self.global_fallback = global_fallback or []
         self.max_recipients = max_recipients
@@ -111,9 +113,13 @@ class RecipientResolver:
                 log.warning("pessoa_sem_email_mapeado", pessoa=texto)
         return Resolution(emails=self._dedup(emails), source="autoria") if emails else Resolution()
 
-    async def resolve_for_event(self, project_id: str | None, detail: dict[str, Any]) -> Resolution:
-        """Responsavel do projeto/stack + quem mexeu no recurso. Workflow com
-        lista exclusiva em `people.yaml: workflows` ignora projeto e autor."""
+    async def resolve_for_event(self, project_id: str | None, detail: dict[str, Any], *,
+                                fonte: str | None = None) -> Resolution:
+        """Responsavel do projeto/stack + quem mexeu no recurso. Lista exclusiva em
+        `people.yaml` (`fontes:` por fonte, `workflows:` por id) ignora projeto e autor."""
+        exclusivo_da_fonte = self.por_fonte.get(fonte or "")
+        if exclusivo_da_fonte:
+            return Resolution(emails=self._dedup(exclusivo_da_fonte), source="fonte_exclusiva")
         exclusivo = self.exclusivos.get(str(detail.get("workflow_id")))
         if exclusivo:
             return Resolution(emails=self._dedup(exclusivo), source="workflow_exclusivo")
@@ -127,17 +133,6 @@ class RecipientResolver:
             source="+".join(x.source for x in fontes),
             detail=base.detail,
         )
-
-    async def resolve_for_portainer_resource(
-        self, user_ids: list[str], tenant_hint: str | None
-    ) -> Resolution:
-        """ResourceControl do Portainer vem com id de usuario. Mesmo mapa."""
-        users_by_id = await self._load_users()
-        emails = [users_by_id[u] for u in user_ids if users_by_id and u in users_by_id]
-        if emails:
-            return Resolution(emails=self._dedup(emails), source="portainer_resource_control",
-                              detail=f"hint={tenant_hint}")
-        return self._fallback(tenant_hint, "portainer_sem_mapa_de_usuarios")
 
     def _fallback(self, tenant_id: str | None, why: str) -> Resolution:
         if tenant_id and tenant_id in self.people:
@@ -155,18 +150,6 @@ class RecipientResolver:
         return Resolution(emails=[], source="nenhum",
                           detail=f"{why}; nenhum destinatario -- ALERTA PERDIDO")
 
-    def union(self, *resolucoes: Resolution) -> Resolution:
-        """Uniao n8n + Portainer, que e exatamente a definicao de 'responsavel'."""
-        vistos: list[str] = []
-        fontes: list[str] = []
-        for r in resolucoes:
-            if r.emails:
-                fontes.append(r.source)
-            vistos.extend(r.emails)
-        if not vistos:
-            return self._fallback(None, "uniao_vazia")
-        return Resolution(emails=self._dedup(vistos), source="+".join(sorted(set(fontes))))
-
     def _dedup(self, emails: list[str]) -> list[str]:
         vistos: set[str] = set()
         saida: list[str] = []
@@ -179,8 +162,3 @@ class RecipientResolver:
                 log.warning("limite_de_destinatarios_atingido", limite=self.max_recipients)
                 break
         return saida
-
-    def invalidate(self) -> None:
-        self._cache.clear()
-        self._user_by_id = None
-

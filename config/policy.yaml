@@ -62,6 +62,25 @@ rules:
     template: "execution_failed"
     re_notify_after_minutes: 720
 
+  # RPA (fluxo de desktop do Power Automate). Mesma escada do n8n: 3 falhas seguidas
+  # do mesmo fluxo e critico; 1 avisa uma vez. Medido em 14/10/2026: um fluxo de hora em
+  # hora falhando desde 01/10 (WindowsIdentityIncorrect) -- ~319 falhas sem aviso.
+  - name: "rpa_falhando_repetidamente"
+    event_types: ["desktop_flow_failed"]
+    severity: critical
+    min_streak: 3
+    notify: true
+    template: "desktop_flow_failing"
+    re_notify_after_minutes: 720
+
+  - name: "rpa_falhou_uma_vez"
+    event_types: ["desktop_flow_failed"]
+    severity: high
+    min_streak: 1
+    notify: true
+    template: "desktop_flow_failed"
+    re_notify_after_minutes: 720
+
   - name: "workflow_desativado"
     event_types: ["workflow_deactivated"]
     severity: high

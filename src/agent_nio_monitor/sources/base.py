@@ -7,6 +7,20 @@ from datetime import datetime
 from typing import Any
 
 
+def _erro_total_de_endpoints(escuros: list[int], total: int) -> str | None:
+    """`error` so quando NENHUM endpoint respondeu -- total darkness.
+
+    Distingue os dois casos que antes eram o mesmo "saudavel": parte das
+    fontes caiu (`failures > 0`, visivel no /healthz) e nenhuma fonte
+    responde (`error`, 503). Um monitor que so conhece "ok ou nao" trata
+    subtotal como total, e e exatamente o buraco que esconde um endpoint
+    inteiro fora do ar.
+    """
+    if not escuros or len(escuros) < total:
+        return None
+    return f"nenhum endpoint respondeu (illegiveis: {escuros})"
+
+
 @dataclass
 class CollectorResult:
     collected: int = 0

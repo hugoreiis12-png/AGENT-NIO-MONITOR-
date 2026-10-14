@@ -51,7 +51,10 @@ def tema_da_severidade(severidade: str) -> Tema:
 
 
 def _quem_mexeu(contexto: dict) -> list[tuple[str, str]]:
-    campos = (("stack", "Stack"), ("responsavel_stack", "Responsável pela stack"), ("autor", "Última alteração por"))
+    campos = (
+        ("stack", "Stack"), ("responsavel_stack", "Responsável pela stack"),
+        ("responsavel_fluxo", "Responsável pelo fluxo"), ("autor", "Última alteração por"),
+    )
     return [(rotulo, str(contexto[chave])) for chave, rotulo in campos if contexto.get(chave)]
 
 

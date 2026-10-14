@@ -8,6 +8,8 @@ from uuid import uuid4
 from agent_nio_monitor.store.queue import (
     ATUALIZADO,
     ENFILEIRADO,
+    LEASE_SEGUNDOS,
+    SENT,
     SUPRIMIDO,
     InMemoryQueue,
     chave_de_dedup,
@@ -75,7 +77,46 @@ class TestSaida:
         q.enqueue(evento(resource_id="cedo"), ready_at=T0, renotify_minutes=0, now=T0)
         q.enqueue(evento(resource_id="tarde"), ready_at=T0 + timedelta(seconds=40), renotify_minutes=0, now=T0)
         assert [i.resource_id for i in q.due(T0 + timedelta(seconds=10))] == ["cedo"]
-        assert len(q.due(T0 + timedelta(seconds=41))) == 2
+        # No segundo `due()` so entra o que ficou pronto agora. O "cedo" NAO
+        # volta: foi reservado na primeira leitura.
+        assert [i.resource_id for i in q.due(T0 + timedelta(seconds=41))] == ["tarde"]
+
+    def test_item_reservado_nao_sai_de_novo_antes_do_lease(self) -> None:
+        """A reserva e o que impede DOIS despachantes de mandar o mesmo e-mail.
+
+        Antes o `due()` era um `SELECT` puro: nao mudava nada, entao a segunda
+        leitura devolvia a mesma linha. Seguro so porque havia um unico laco
+        serializado -- nenhuma garantia no banco."""
+        q = InMemoryQueue()
+        q.enqueue(evento(), ready_at=T0, renotify_minutes=0, now=T0)
+
+        primeiro = q.due(T0)
+        assert len(primeiro) == 1
+
+        # segunda leitura dentro do lease: nada
+        assert q.due(T0 + timedelta(seconds=LEASE_SEGUNDOS - 1)) == []
+        # depois do lease: volta, porque o primeiro despachante nao o resolveu
+        assert len(q.due(T0 + timedelta(seconds=LEASE_SEGUNDOS + 1))) == 1
+
+    def test_marcar_resolvido_libera_a_reserva(self) -> None:
+        """`mark_sent`/`mark_retry` sobrescrevem `next_attempt_at`, entao um item
+        ja resolvido nao fica preso esperando o lease expirar."""
+        q = InMemoryQueue()
+        q.enqueue(evento(), ready_at=T0, renotify_minutes=0, now=T0)
+        item = q.due(T0)[0]
+        q.mark_sent(item.id, T0)
+        assert q.due(T0 + timedelta(seconds=1)) == []
+        assert q.items[0].status == SENT
+
+    def test_lease_maior_que_o_backoff_maximo(self) -> None:
+        """Se o lease fosse MENOR que o backoff de reenvio, um segundo
+        despachante roubaria o item ainda em voo -- e o bug de e-mail
+        duplicado voltaria pela outra porta."""
+        from agent_nio_monitor.notify.dispatcher import ESPERAS_SEGUNDOS
+
+        assert max(ESPERAS_SEGUNDOS) < LEASE_SEGUNDOS, (
+            f"lease de {LEASE_SEGUNDOS}s e menor que o backoff de {max(ESPERAS_SEGUNDOS)}s"
+        )
 
     def test_reagendado_so_volta_depois_da_espera(self) -> None:
         q = InMemoryQueue()

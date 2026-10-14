@@ -17,7 +17,8 @@ import respx
 
 from agent_nio_monitor.sources.n8n.client import CursorInvalid, N8NApiError, N8NClient
 from agent_nio_monitor.sources.n8n.collector import ExecutionErrorCollector
-from agent_nio_monitor.store.repository import CursorState, InMemoryRepository
+from agent_nio_monitor.store.repository import CursorState
+from agent_nio_monitor.store.memory_repository import InMemoryRepository
 
 BASE = "http://n8n.test"
 FIXTURE = (

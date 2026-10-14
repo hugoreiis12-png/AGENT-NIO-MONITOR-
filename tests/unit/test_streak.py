@@ -24,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from agent_nio_monitor.store.repository import InMemoryRepository
+from agent_nio_monitor.store.memory_repository import InMemoryRepository
 
 BASE = datetime(2026, 10, 12, 16, 30, tzinfo=UTC)
 

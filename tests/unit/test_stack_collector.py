@@ -7,7 +7,7 @@ import respx
 
 from agent_nio_monitor.sources.portainer.client import PortainerClient
 from agent_nio_monitor.sources.portainer.stacks import StackCollector
-from agent_nio_monitor.store.repository import InMemoryRepository
+from agent_nio_monitor.store.memory_repository import InMemoryRepository
 
 PTAI = "https://portainer.test"
 

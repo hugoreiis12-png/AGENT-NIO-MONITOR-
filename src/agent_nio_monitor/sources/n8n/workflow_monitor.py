@@ -65,14 +65,18 @@ class WorkflowMonitor:
         )
 
         if anterior is None:
+            # O snapshot vem DEPOIS do evento, nunca antes. Gravar primeiro
+            # avanca o baseline do diff: se o evento falhasse de qualquer jeito
+            # depois disso, o proximo ciclo compararia contra o estado NOVO e a
+            # mudanca nunca mais seria detectada -- perda silenciosa.
+            evento = self._evento_criado(workflow, workflow_id, nome) if baseline else None
             self.repo.save_workflow_snapshot(workflow_id, version_id, ativo, workflow)
             # Sem linha de base global e a primeira coleta; com ela, e workflow NOVO.
-            return [self._evento_criado(workflow, workflow_id, nome)] if baseline else []
+            return [evento] if evento is not None else []
 
         mudancas: list[Change] = diff_workflows(anterior["body"], workflow)
         if not mudancas:
             return []  # snapshot equivalente ao atual: gravar de novo so incharia o banco
-        self.repo.save_workflow_snapshot(workflow_id, version_id, ativo, workflow)
 
         eventos = []
         if any(_eh_toggle(m) for m in mudancas):
@@ -80,6 +84,9 @@ class WorkflowMonitor:
         estruturais = [m for m in mudancas if not _eh_toggle(m)]
         if estruturais:
             eventos.append(self._evento_alterado(workflow, workflow_id, nome, estruturais))
+
+        # Ultima operacao de escrita do ciclo, com os eventos ja em maos.
+        self.repo.save_workflow_snapshot(workflow_id, version_id, ativo, workflow)
         return eventos
 
     def _evento_toggle(self, workflow_id: str, nome: str, ativo: bool, autor: str | None) -> EventRecord:

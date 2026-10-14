@@ -16,7 +16,8 @@ import pytest
 
 from agent_nio_monitor.main import Agent
 from agent_nio_monitor.notify import templates
-from agent_nio_monitor.store.repository import EventRecord, InMemoryRepository
+from agent_nio_monitor.store.repository import EventRecord
+from agent_nio_monitor.store.memory_repository import InMemoryRepository
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "executions_erros_reais.json"
 

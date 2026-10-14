@@ -18,10 +18,10 @@ import pytest
 from agent_nio_monitor.redaction import REDACTED, redact
 from agent_nio_monitor.rules.engine import RuleEngine
 from agent_nio_monitor.sources.base import CollectorResult, dentro_de_quiet_hours
+from agent_nio_monitor.store.memory_repository import InMemoryRepository
 from agent_nio_monitor.store.repository import (
     ExecutionRecord,
     FailureRecord,
-    InMemoryRepository,
     Streak,
 )
 

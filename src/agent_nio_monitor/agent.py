@@ -1,9 +1,9 @@
 """Pipeline principal. Cada estagio e isolado e testavel; `main.py` so monta o
 CLI e o scheduler em torno desta classe.
 
-Ordem deliberada: Capabilities (D2) -> health sobe -> coleta -> regra -> texto ->
-envio -> registro. Saude ANTES da coleta para que o cron externo veja o processo
-desde o primeiro segundo.
+Ordem deliberada: health sobe -> sonda de capacidade (D2) -> coleta -> regra ->
+texto -> envio -> registro. O health ANTES de tudo, porque e o que o cron
+externo consulta e o unico sinal que sobrevive a um boot quebrado.
 """
 
 from __future__ import annotations
@@ -12,27 +12,30 @@ from typing import Any
 
 import structlog
 
-from .config.loader import ConfigError, load_policy
+from .boot_probe import sondar_no_boot
 from .config.schema import AppConfig
 from .health import HealthState
 from .llm.analyst import AlertAnalyst
 from .llm.client import LlmClient
-from .notify.compose import compor
 from .notify.mailer import DispatchResult, Notifier
 from .notify.pipeline import EventPipeline
 from .notify.resolution import ResolutionChecker
-from .notify.people import exclusive_by_workflow, people_by_project, portainer_users
+from .notify.people import exclusive_by_source, exclusive_by_workflow, fallback_de_emergencia, people_by_project, portainer_users
 from .notify.resolver import RecipientResolver
-from .notify.templates import formatar_horas
+from .notify.sender import enviar_alerta
 from .rules.engine import RuleEngine
 from .sources.n8n.client import N8NClient
 from .sources.n8n.collector import ExecutionErrorCollector
+from .sources.n8n.credentials import CredentialCollector
+from .sources.n8n.events import evento_de_buraco, evento_de_falha, evento_de_queda
 from .sources.n8n.workflow_index import WorkflowIndex
 from .sources.n8n.workflow_monitor import WorkflowMonitor
 from .sources.portainer.suite import build_portainer
-from .store.postgres_repository import PostgresRepository
-from .store.queue import InMemoryQueue, NotificationQueue, PostgresQueue
-from .store.repository import EventRecord, Repository, new_event_id, now_utc
+from .sources.powerautomate.events import TIPO as TIPO_DESKTOP
+from .sources.powerautomate.events import evento_de_falha_desktop
+from .sources.powerautomate.suite import build_power_automate
+from .store.queue import InMemoryQueue, NotificationQueue
+from .store.repository import EventRecord, Repository, now_utc
 
 log = structlog.get_logger()
 
@@ -41,8 +44,16 @@ class Agent:
     def __init__(self, cfg: AppConfig, repo: Repository, queue: NotificationQueue | None = None) -> None:
         self.cfg = cfg
         self.repo = repo
-        self.policy = load_policy()
+        # `cfg.policy`, e nao `load_policy()`: o `loader` ja leu e validou o
+        # arquivo em `load()`. Chamar de novo fazia uma segunda leitura de disco
+        # e criava um SEGUNDO objeto `PolicyConfig` -- dois objetos para a mesma
+        # fonte de verdade, que divergem silenciosamente se o arquivo mudar no
+        # meio do boot.
+        self.policy = cfg.policy
         self.rules = RuleEngine(self.policy)
+        # Estado anterior da alcancabilidade do n8n, para emitir `source_down`
+        # so na TRANSICAO. `None` = ainda nao se sabe, e nao conta como queda.
+        self._n8n_era_up: bool | None = None
         self.health = HealthState()
         self.llm = LlmClient(
             cfg.llm.base_url, cfg.llm.model,
@@ -67,18 +78,21 @@ class Agent:
             people=people_by_project(),
             usuarios=portainer_users(),
             exclusivos=exclusive_by_workflow(),
+            por_fonte=exclusive_by_source(),
+            global_fallback=fallback_de_emergencia(),
             max_recipients=self.policy.max_recipients,
         )
         self.n8n = self.resolver.client
         self.index = WorkflowIndex(self.n8n)
         self.workflow_monitor = WorkflowMonitor(self.n8n, self.repo)
         self.containers, self.stacks, self.resources = build_portainer(cfg, self.repo) or (None, None, None)
+        self.desktop = build_power_automate(cfg, self.repo)
         self.pipeline = EventPipeline(
             repo=self.repo, queue=queue if queue is not None else InMemoryQueue(), rules=self.rules,
             polling=cfg.polling, health=self.health, dispatch=self.dispatch,
             checker=ResolutionChecker(
                 containers=self.containers, resources=self.resources, n8n=self.n8n, repo=self.repo,
-                limites=cfg.policy.thresholds,
+                limites=cfg.policy.thresholds, desktop=self.desktop,
             ),
         )
 
@@ -89,110 +103,68 @@ class Agent:
         await self.index.load()
         resultado = await collector.run(name_by_id=self.index.names)
         self.health.mark("n8n_executions", resultado.ok)
+        self.health.mark_n8n(self.n8n.alive)
         if resultado.gap:
-            self.health.gaps_detected += 1
+            self.health.conta_gap()
+
+        # O buraco vem ANTES do early-return: uma varredura completa que nao
+        # acha nenhuma execucao nova ainda assim perdeu historico, e essa e a
+        # informacao que o dono precisa.
+        eventos: list[EventRecord] = list(self._detecta_queda_do_n8n())
+        if resultado.gap:
+            eventos.append(self._evento_de_buraco(resultado))
 
         if not resultado.collected:
-            return []
+            return eventos
 
         # O streak ja foi acumulado pelo coletor. Aqui so se DECIDE o que fazer.
-        eventos: list[EventRecord] = []
         ultimos = resultado.extra.get("ultimos_erros", {})
         for workflow_id, streak in resultado.extra.get("streaks", {}).items():
-            falha = ultimos.get(workflow_id)
-            nome = getattr(streak, "workflow_name", None) or workflow_id
             decisao = self.rules.evaluate(
                 event_type="execution_failed",
                 streak_count=streak.count,
                 last_notified_at=streak.last_notified_at,
                 now=now_utc(),
             )
-            primeiro = formatar_horas(streak.first_at)
-            ultimo = formatar_horas(streak.last_at)
-            eventos.append(
-                EventRecord(
-                    id=new_event_id(),
-                    ts=now_utc(),
-                    source="n8n",
-                    event_type="execution_failed",
-                    severity=decisao.severity,
-                    title=f"{nome} falhou {streak.count}x",
-                    tenant_id=self.index.projects.get(workflow_id),
-                    resource_id=workflow_id,
-                    streak_count=streak.count,
-                    detail={
-                        "workflow_id": workflow_id,
-                        "workflow_name": nome,
-                        "workflow_nome": nome,
-                        "ocorrencias": streak.count,
-                        "ultima_falha_ts": streak.last_at.isoformat(),
-                        "autor": self.index.authors.get(workflow_id),
-                        "erro": falha.error_msg if falha else None,
-                        "no": falha.last_node if falha else None,
-                        "primeira": primeiro,
-                        "ultima": ultimo,
-                        "notificar": decisao.notify,
-                        "motivo_supressao": decisao.suppress_reason,
-                        "template": decisao.template,
-                    },
-                )
-            )
+            eventos.append(evento_de_falha(workflow_id, streak, ultimos.get(workflow_id), decisao, self.index))
         return eventos
+
+    def _evento_de_buraco(self, resultado: Any) -> EventRecord:  # noqa: ANN001 - CollectorResult
+        """Buraco de reconciliacao (D7). Vai antes das falhas: explica por que pode faltar uma."""
+        decisao = self.rules.evaluate(event_type="reconciliation_gap", now=now_utc())
+        return evento_de_buraco(resultado.extra.get("reconciliation") or {}, decisao)
+
+    def _detecta_queda_do_n8n(self) -> list[EventRecord]:
+        """Emite `source_down` na TRANSICAO, nao a cada ciclo.
+
+        `notify: false` na policy e estrutural: o canal de envio e o webhook do
+        proprio n8n, entao o valor do evento e o RASTREIO (gravado e logado), e
+        `EventPipeline.enqueue` nao o enfileira. A recuperacao so gera log.
+        """
+        anterior = self._n8n_era_up
+        atual = self.health.n8n_up
+        self._n8n_era_up = atual
+
+        if atual is False and anterior is not False:
+            decisao = self.rules.evaluate(event_type="source_down", now=now_utc())
+            log.error(
+                "n8n_ficou_fora",
+                titulo="n8n indisponivel",
+                efeito="coleta de execucoes e diff de workflow parados; "
+                       "alertas por e-mail impossiveis (o webhook e do proprio n8n)",
+            )
+            return [evento_de_queda(decisao)]
+        if atual is True and anterior is False:
+            log.info("n8n_ficou_de_pe", titulo="n8n voltou a responder")
+        return []
 
     # -------------------------------------------------------- pipeline de alerta
 
     async def dispatch(self, evento: EventRecord) -> DispatchResult:
-        decisao_texto = evento.detail.get("notificar", True)
-        if not decisao_texto:
-            log.info(
-                "evento_registrado_sem_notificar",
-                evento=evento.title,
-                motivo=evento.detail.get("motivo_supressao"),
-            )
-            return DispatchResult(status="suppressed", channel="nenhuma")
-
-        projeto = evento.tenant_id
-        destinatarios = await self.resolver.resolve_for_event(projeto, evento.detail)
-        if destinatarios.source in ("people_yaml", "global_fallback", "nenhum"):
-            log.warning(
-                "destinatario_por_fallback",
-                fonte=destinatarios.source,
-                detalhe=destinatarios.detail,
-            )
-
-        contexto = {
-            **evento.detail, "tipo": evento.event_type,
-            "titulo": evento.title, "severidade": evento.severity,
-        }
-        mensagem = await compor(self.analyst, evento, contexto, self.cfg)
-
-        resultado = await self.notifier.send(
-            recipients=destinatarios.emails,
-            subject=mensagem.assunto,
-            body=mensagem.corpo,
-            html=mensagem.html,
-            n8n_up=bool(self.health.n8n_up is not False),
-            severity=evento.severity,
-            metadata={
-                "event_id": str(evento.id),
-                "streak": evento.streak_count,
-                "llm": mensagem.status_llm,
-            },
+        return await enviar_alerta(
+            evento, resolver=self.resolver, analyst=self.analyst, notifier=self.notifier,
+            repo=self.repo, health=self.health, cfg=self.cfg,
         )
-
-        self.repo.save_notification(
-            event_id=evento.id,
-            channel=resultado.channel,
-            recipients=resultado.recipients,
-            subject=mensagem.assunto,
-            body=mensagem.corpo,
-            status=resultado.status,
-            error=resultado.error,
-            attempts=resultado.attempts,
-        )
-        if resultado.status in ("sent", "sent_to_log") and evento.resource_id:
-            self.repo.mark_streak_notified(evento.resource_id, now_utc())
-        return resultado
 
     async def run_once(self) -> dict[str, Any]:
         inicio = now_utc()
@@ -229,12 +201,39 @@ class Agent:
 
     async def _ciclo(self, resultado, chave: str) -> int:  # noqa: ANN001 - CollectorResult
         self.health.mark(chave, resultado.ok)
+        # Falha parcial nao vira `error` (o resto da fonte responde), mas
+        # tambem nao pode sumir: era o que escondia um endpoint inteiro do
+        # Portainer fora do ar enquanto o /healthz dizia "ok".
+        escuros = resultado.extra.get("endpoints_escuros") or []
+        if resultado.failures or escuros:
+            self.health.registra_fonte_parcial(
+                chave, {"falhas": resultado.failures, "endpoints_escuros": escuros}
+            )
+        else:
+            self.health.limpa_fonte_parcial(chave)
         eventos = [self._decidir(e) for e in resultado.extra.get("eventos", [])]
         return await self.process_events(eventos)
+
+    async def run_capabilities(self) -> dict[str, int]:
+        """D2 no boot. NUNCA levanta: ver `boot_probe.sondar_no_boot`."""
+        return await sondar_no_boot(self.cfg, self.repo)
+
+    async def check_credentials(self) -> int:
+        """Rotacao de credencial. Roda no mesmo ciclo do diff de workflow --
+        o payload e de 39 itens, uma chamada, e ja pagamos a leitura da lista
+        de workflows que e de 11,2 MB."""
+        collector = CredentialCollector(self.n8n, self.repo)
+        resultado = await collector.check_credentials()
+        self.health.mark_n8n(self.n8n.alive)
+        return await self._ciclo(resultado, "n8n_credentials")
 
     async def check_workflows_full(self) -> int:
         await self.index.load()
         resultado = await self.workflow_monitor.check_structural_diff(name_by_id=self.index.names)
+        # Mesmo caminho do n8n que fala com o monitor de forma mais silenciosa:
+        # `WorkflowIndex.load()` engole a excecao e so loga. Sem este espelho,
+        # uma queda do n8n que so aparece aqui nunca chegaria ao `/healthz`.
+        self.health.mark_n8n(self.n8n.alive)
         return await self._ciclo(resultado, "n8n_workflows_full")
 
     async def check_containers(self) -> int:
@@ -252,6 +251,26 @@ class Agent:
             return 0
         return await self._ciclo(await self.resources.check_resources(), "portainer_resources")
 
+    async def check_power_automate(self) -> int:
+        """Execucoes de RPA: um evento por fluxo com falha neste ciclo, decidido pelo streak."""
+        if self.desktop is None:
+            return 0
+        resultado = await self.desktop.run()
+        self.health.mark("powerautomate_desktop", resultado.ok)
+        falhas = resultado.extra.get("ultimas_falhas", {})
+        eventos = [
+            self._evento_desktop(streak, falhas[chave])
+            for chave, streak in resultado.extra.get("streaks", {}).items() if chave in falhas
+        ]
+        return await self.process_events(eventos)
+
+    def _evento_desktop(self, streak: Any, sessao: Any) -> EventRecord:  # noqa: ANN401 - Streak, SessaoDesktop
+        decisao = self.rules.evaluate(
+            event_type=TIPO_DESKTOP, streak_count=streak.count,
+            last_notified_at=streak.last_notified_at, now=now_utc(),
+        )
+        return evento_de_falha_desktop(streak, sessao, decisao)
+
 
 def _active_url(cfg: AppConfig) -> str:
     return cfg.active.n8n.url
@@ -261,24 +280,3 @@ def _secret(cfg: AppConfig) -> str:
     import os
 
     return os.environ.get(cfg.active.n8n.api_key_env, "")
-
-
-def build(cfg: AppConfig, repo: Repository | None = None) -> Agent:
-    if repo is None:
-        db = _make_db(cfg)
-        db.open()
-        db.migrate()
-        db.ensure_partitions()
-        return Agent(cfg, PostgresRepository(db), PostgresQueue(db))
-    return Agent(cfg, repo)
-
-
-def _make_db(cfg: AppConfig):  # noqa: ANN202
-    from .store.db import Database
-
-    dsn = cfg.database.dsn.replace("${DATABASE_DSN}", "")
-    if not dsn:
-        raise ConfigError("DATABASE_DSN ausente (ver .env.example)")
-    return Database(
-        dsn, cfg.database.db_schema, cfg.database.pool_min, cfg.database.pool_max
-    )
