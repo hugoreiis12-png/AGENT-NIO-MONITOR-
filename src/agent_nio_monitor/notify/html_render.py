@@ -72,6 +72,7 @@ def render_html(
         rotulo=ROTULO_POR_SEVERIDADE.get(evento.severity, evento.severity.upper()),
         subtitulo=evento.title, assets=cfg.mail.assets_base_url.rstrip("/"), suporte=cfg.mail.support_email,
         resumo=resumo, causa=analise["causa_provavel"] if analise else None, passos=passos,
+        confianca=(analise or {}).get("confianca"), evidencias=(analise or {}).get("evidencias") or [],
         detalhes=pares(contexto, excluir=SEM_DETALHE), log=contexto.get("logs"),
         quem=_quem_mexeu(contexto), quando=formatar_brasilia(evento.ts),
         botao={"texto": link[0], "url": link[1]} if link else None,

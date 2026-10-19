@@ -14,11 +14,12 @@ from typing import Any
 
 import structlog
 
-from ...redaction import redact
+from ...redaction import redact, redact_text
 from ...store.repository import CursorState, ExecutionRecord, FailureRecord, Repository
 from ...store.repository import now_utc
 from ..base import CollectorResult
 from .client import CursorInvalid, N8NApiError, N8NClient
+from .node_path import resumo_do_caminho
 
 log = structlog.get_logger(__name__)
 
@@ -202,11 +203,13 @@ class ExecutionErrorCollector:
         erro: str | None = None
         ultimo_no: str | None = None
         run_data: Any = None
+        caminho: str | None = None
         truncado = True
         try:
             detalhe = await self.client.get_execution(record.id, include_data=True)
             erro, ultimo_no = extrair_erro(detalhe)
             run_data = ((detalhe.get("data") or {}).get("resultData") or {}).get("runData")
+            caminho = resumo_do_caminho(run_data or {})
             truncado = bool(detalhe.get("dataTooLargeToDisplay", False))
         except N8NApiError as exc:
             # Falhar em buscar o payload NAO pode perder o evento principal.
@@ -224,6 +227,7 @@ class ExecutionErrorCollector:
             # payload com senha entraria silenciosamente.
             run_data=redact(run_data) if run_data is not None else None,
             truncated=truncado,
+            caminho=redact_text(caminho) if caminho else None,
         )
 
 

@@ -14,6 +14,7 @@ from datetime import datetime
 
 from ..fuso import formatar_brasilia
 
+from .acoes import ACAO_PADRAO
 from .corpo_analise import corpo_com_analise
 
 SEV_LABEL = {
@@ -41,6 +42,14 @@ SUBJECT = {
     "stack_changed": "[{sev}] Stack {nome} foi alterada",
     "container_removed": "[{sev}] Container removido: {nome}",
     "container_resource_high": "[{sev}] Consumo alto: {nome}",
+    "node_error_hidden": "[{sev}] {nome}: erro escondido em execucao com sucesso",
+    "node_not_executed": "[{sev}] {nome}: etapa do fluxo nao rodou",
+    "workflow_trigger_failed": "[{sev}] Gatilho de {nome} falhando",
+    "container_log_error": "[{sev}] Erro no log de {nome}",
+    "desktop_flow_handled_errors": "[{sev}] RPA {nome} terminou com erros tratados",
+    "workflow_refactored": "[{sev}] {nome} foi reorganizado (sem impacto no fluxo)",
+    "container_created": "[{sev}] Container criado: {nome}",
+    "desktop_flow_created": "[{sev}] Fluxo de RPA criado: {nome}",
     "generic": "[{sev}] {titulo}",
 }
 
@@ -86,6 +95,28 @@ Acao sugerida
 Ver no n8n: {url_workflow}
 """
 
+_BODY_ETAPAS = """
+O que aconteceu
+---------------
+{detalhe}
+
+Erro: {erro}
+Ultima ocorrencia: {ultima}
+
+Caminho executado
+-----------------
+{caminho}
+
+Acao sugerida
+-------------
+{acao}
+{link_workflow}"""
+
+TEMPLATES_DE_ETAPA = (
+    "node_error_hidden", "node_not_executed", "workflow_trigger_failed",
+    "container_log_error", "desktop_flow_handled_errors",
+)
+
 _BODY_SIMPLE = """
 {detalhe}
 
@@ -95,35 +126,6 @@ Acao sugerida
 """
 
 
-# Acao padrao por template. Sem isso o render quebrava com KeyError -- o que
-# significa que NENHUM email saía. Um template que estoura em producao e o mesmo
-# que template inexistente.
-ACAO_PADRAO = {
-    "workflow_failing": (
-        "Abrir o workflow no n8n e olhar o ultimo no executado. "
-        "Se a falha se repete no mesmo horario, e job agendado quebrado, "
-        "nao incidente."
-    ),
-    "execution_failed": "Abrir a execucao no n8n e ver o erro completo.",
-    "desktop_flow_failing": (
-        "Abrir o Power Automate em Monitorar > Execucoes de fluxo da area de trabalho e ver o erro. "
-        "Erro de logon (WindowsIdentityIncorrect) e conexao da maquina com usuario ou senha errados."
-    ),
-    "desktop_flow_failed": "Abrir o Power Automate em Monitorar > Execucoes de fluxo da area de trabalho e ver o erro.",
-    "workflow_changed": "Conferir se a mudanca era esperada e o que mais mudou junto.",
-    "workflow_deactivated": "Confirmar com quem desativou e reativar se foi engano.",
-    "workflow_activated": "Nada a fazer. Registro para auditoria.",
-    "credential_updated": "Confirmar a rotacao e verificar se algum workflow depende do valor antigo.",
-    "container_down": "Verificar os logs do container e o resource limit.",
-    "restart_loop": "Checar memoria/CPU e a ultima alteracao no servico.",
-    "reconciliation_gap": "O monitor perdeu eventos. Conferir se o n8n podou execucoes antigas.",
-    "source_down": "Restaurar o servico. O monitor nao consegue notificar por email enquanto isso.",
-    "workflow_created": "Confirmar com o autor que o workflow era esperado e revisar credenciais e gatilhos.",
-    "stack_changed": "Conferir com quem alterou se a mudanca era esperada e se os servicos subiram.",
-    "container_removed": "Confirmar se a remocao foi intencional; se nao, recriar a partir da stack.",
-    "container_resource_high": "Ver o que consome o recurso e ajustar o limite ou escalar o servico.",
-    "generic": "Ver o detalhe do evento.",
-}
 
 
 def _padrao(d: dict, chave: str, fallback: str) -> None:
@@ -209,6 +211,7 @@ def render(
     _padrao(d, "autor", "Autoria nao disponivel nesta versao do n8n")
     _padrao(d, "primeira", "-")
     _padrao(d, "ultima", "-")
+    _padrao(d, "caminho", "(nao registrado)")
     _padrao(d, "min", "?")
     _padrao(d, "titulo", event.title)
     _padrao(d, "url_workflow", "")
@@ -229,7 +232,9 @@ def render(
 
     if template in ("workflow_failing", "execution_failed", "desktop_flow_failing", "desktop_flow_failed"):
         corpo = _BODY_EXEC.format(**d)
-    elif template == "workflow_changed":
+    elif template in TEMPLATES_DE_ETAPA:
+        corpo = _BODY_ETAPAS.format(**d)
+    elif template in ("workflow_changed", "workflow_refactored"):
         corpo = _BODY_CHANGED.format(**d)
     else:
         corpo = _BODY_SIMPLE.format(**d)

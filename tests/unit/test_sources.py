@@ -246,18 +246,18 @@ class TestNotificador:
         payload = json.loads(capturado.err.strip().split(" ", 1)[1])
         assert payload["para"] == ["a@b.c"]
 
-    async def test_webhook_quebrado_cai_para_log(self, respx_mock) -> None:
-        """Se o n8n esta fora, o proprio webhook falha. O alerta nao pode ser
-        descartado por causa disso."""
-        respx_mock.post("http://n8n.test/webhook/x").mock(
-            return_value=httpx.Response(503)
-        )
-        from agent_nio_monitor.notify.mailer import Notifier
+    async def test_webhook_quebrado_com_n8n_de_pe_e_falha_retentavel(self, respx_mock, capsys) -> None:
+        """n8n de pe e webhook falhando (workflow de e-mail desativado) nao pode
+        virar `sent_to_log`: contaria como enviado e ninguem saberia."""
+        from agent_nio_monitor.notify.mailer import LOG_PREFIX, Notifier
 
-        async with Notifier(webhook_url="http://n8n.test/webhook/x", max_attempts=2) as n:
-            r = await n.send(recipients=["a@b.c"], subject="s", body="b", n8n_up=True)
-        assert r.status == "sent_to_log"
-        assert r.attempts == 2
+        for status in (404, 503):
+            respx_mock.post("http://n8n.test/webhook/x").mock(return_value=httpx.Response(status))
+            async with Notifier(webhook_url="http://n8n.test/webhook/x", max_attempts=2) as n:
+                r = await n.send(recipients=["a@b.c"], subject="s", body="b", n8n_up=True)
+            assert r.status == "failed" and r.retryable
+            assert r.attempts == 2 and str(status) in (r.error or "")
+        assert LOG_PREFIX not in capsys.readouterr().err
 
     async def test_sem_destinatario_falha_visivel(self) -> None:
         """'Ninguem notificado' precisa ser erro, nao sucesso silencioso."""

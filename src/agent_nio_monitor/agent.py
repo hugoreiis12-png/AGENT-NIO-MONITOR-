@@ -14,6 +14,7 @@ import structlog
 
 from .boot_probe import sondar_no_boot
 from .config.schema import AppConfig
+from .deep_collection import DeepCollection
 from .health import HealthState
 from .llm.analyst import AlertAnalyst
 from .llm.client import LlmClient
@@ -24,16 +25,16 @@ from .notify.people import exclusive_by_source, exclusive_by_workflow, fallback_
 from .notify.resolver import RecipientResolver
 from .notify.sender import enviar_alerta
 from .rules.engine import RuleEngine
-from .sources.n8n.client import N8NClient
 from .sources.n8n.collector import ExecutionErrorCollector
 from .sources.n8n.credentials import CredentialCollector
 from .sources.n8n.events import evento_de_buraco, evento_de_falha, evento_de_queda
+from .sources.n8n.suite import build_n8n
 from .sources.n8n.workflow_index import WorkflowIndex
 from .sources.n8n.workflow_monitor import WorkflowMonitor
 from .sources.portainer.suite import build_portainer
-from .sources.powerautomate.events import TIPO as TIPO_DESKTOP
-from .sources.powerautomate.events import evento_de_falha_desktop
+from .sources.powerautomate.cycle import eventos_de_erro_tratado, eventos_de_falha
 from .sources.powerautomate.suite import build_power_automate
+from .store.maintenance import PartitionMaintenance
 from .store.queue import InMemoryQueue, NotificationQueue
 from .store.repository import EventRecord, Repository, now_utc
 
@@ -41,9 +42,13 @@ log = structlog.get_logger()
 
 
 class Agent:
-    def __init__(self, cfg: AppConfig, repo: Repository, queue: NotificationQueue | None = None) -> None:
+    def __init__(
+        self, cfg: AppConfig, repo: Repository, queue: NotificationQueue | None = None,
+        maintenance: PartitionMaintenance | None = None,
+    ) -> None:
         self.cfg = cfg
         self.repo = repo
+        self.maintenance = maintenance
         # `cfg.policy`, e nao `load_policy()`: o `loader` ja leu e validou o
         # arquivo em `load()`. Chamar de novo fazia uma segunda leitura de disco
         # e criava um SEGUNDO objeto `PolicyConfig` -- dois objetos para a mesma
@@ -69,12 +74,7 @@ class Agent:
             verify_ssl=cfg.active.n8n.verify_ssl,
         )
         self.resolver = RecipientResolver(
-            N8NClient(
-                _active_url(cfg),
-                _secret(cfg),
-                verify_ssl=cfg.active.n8n.verify_ssl,
-                timeout=cfg.active.n8n.timeout_seconds,
-            ),
+            build_n8n(cfg),
             people=people_by_project(),
             usuarios=portainer_users(),
             exclusivos=exclusive_by_workflow(),
@@ -84,15 +84,21 @@ class Agent:
         )
         self.n8n = self.resolver.client
         self.index = WorkflowIndex(self.n8n)
-        self.workflow_monitor = WorkflowMonitor(self.n8n, self.repo)
+        self.workflow_monitor = WorkflowMonitor(
+            self.n8n, self.repo, refactor_max_score=self.policy.thresholds.refactor_max_score,
+            quieto_minutos=self.policy.aggregation.edicao_quieta_minutos,
+        )
         self.containers, self.stacks, self.resources = build_portainer(cfg, self.repo) or (None, None, None)
         self.desktop = build_power_automate(cfg, self.repo)
+        portainer = self.containers.client if self.containers is not None else None
+        self.deep = DeepCollection(cfg, self.repo, self.n8n, portainer, self.desktop, self.llm)
+        self.analyst.investigador = self.deep.investigador
         self.pipeline = EventPipeline(
             repo=self.repo, queue=queue if queue is not None else InMemoryQueue(), rules=self.rules,
             polling=cfg.polling, health=self.health, dispatch=self.dispatch,
             checker=ResolutionChecker(
                 containers=self.containers, resources=self.resources, n8n=self.n8n, repo=self.repo,
-                limites=cfg.policy.thresholds, desktop=self.desktop,
+                limites=cfg.policy.thresholds, desktop=self.desktop, deep=self.deep,
             ),
         )
 
@@ -190,7 +196,7 @@ class Agent:
         """Aplica a politica unica (RuleEngine) num evento ja construido pelo
         coletor. Mesma logica que `collect_execution_errors` aplica inline --
         aqui centralizada porque workflow/container nao tem streak proprio."""
-        decisao = self.rules.evaluate(event_type=evento.event_type, now=evento.ts)
+        decisao = self.rules.evaluate(event_type=evento.event_type, streak_count=evento.streak_count, now=evento.ts)
         evento.severity = decisao.severity
         evento.detail.setdefault("autor", self.index.authors.get(evento.resource_id or ""))
         evento.tenant_id = evento.tenant_id or self.index.projects.get(evento.resource_id or "")
@@ -222,7 +228,7 @@ class Agent:
         """Rotacao de credencial. Roda no mesmo ciclo do diff de workflow --
         o payload e de 39 itens, uma chamada, e ja pagamos a leitura da lista
         de workflows que e de 11,2 MB."""
-        collector = CredentialCollector(self.n8n, self.repo)
+        collector = CredentialCollector(self.n8n, self.repo, quieto_minutos=self.policy.aggregation.edicao_quieta_minutos)
         resultado = await collector.check_credentials()
         self.health.mark_n8n(self.n8n.alive)
         return await self._ciclo(resultado, "n8n_credentials")
@@ -257,26 +263,27 @@ class Agent:
             return 0
         resultado = await self.desktop.run()
         self.health.mark("powerautomate_desktop", resultado.ok)
-        falhas = resultado.extra.get("ultimas_falhas", {})
-        eventos = [
-            self._evento_desktop(streak, falhas[chave])
-            for chave, streak in resultado.extra.get("streaks", {}).items() if chave in falhas
-        ]
+        fundo = await self.deep.acoes.aprofundar(resultado.extra.get("sessoes", []))
+        eventos = eventos_de_falha(resultado, fundo, self.rules) + eventos_de_erro_tratado(fundo, self.deep.acoes.incidente_tratado, self._decidir)
+        eventos += [self._decidir(e) for e in await self.deep.fluxos.novos()]
         return await self.process_events(eventos)
 
-    def _evento_desktop(self, streak: Any, sessao: Any) -> EventRecord:  # noqa: ANN401 - Streak, SessaoDesktop
-        decisao = self.rules.evaluate(
-            event_type=TIPO_DESKTOP, streak_count=streak.count,
-            last_notified_at=streak.last_notified_at, now=now_utc(),
-        )
-        return evento_de_falha_desktop(streak, sessao, decisao)
+    async def check_execution_paths(self) -> int:
+        """No a no das execucoes com sucesso: erro escondido e etapa do caminho normal que nao rodou."""
+        await self.index.load()
+        resultado = await self.deep.caminhos.run(name_by_id=self.index.names)
+        self.health.mark_n8n(self.n8n.alive)
+        return await self._ciclo(resultado, "n8n_execution_paths")
 
+    async def check_container_logs(self) -> int:
+        if self.deep.logs is None:
+            return 0
+        await self.index.load()
+        por_nome = {nome: wid for wid, nome in self.index.names.items()}
+        return await self._ciclo(await self.deep.logs.check_logs(por_nome), "portainer_logs")
 
-def _active_url(cfg: AppConfig) -> str:
-    return cfg.active.n8n.url
-
-
-def _secret(cfg: AppConfig) -> str:
-    import os
-
-    return os.environ.get(cfg.active.n8n.api_key_env, "")
+    async def maintain_partitions(self) -> int:
+        """Cria os meses a frente e aplica a retencao. Sem banco (InMemory) nao ha o que manter."""
+        if self.maintenance is None:
+            return 0
+        return await self.maintenance.run()

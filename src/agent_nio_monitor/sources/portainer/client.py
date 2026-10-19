@@ -133,13 +133,14 @@ class PortainerClient:
             )
 
     async def container_logs(
-        self, endpoint_id: int, container_id: str, *, tail: int = 200
+        self, endpoint_id: int, container_id: str, *, tail: int = 200,
+        since: int | None = None, timestamps: bool = False,
     ) -> str:
-        """Sob demanda, NUNCA no ciclo. 1 MB por container a cada 60 s e absurdo."""
-        resp = await self._fetch(
-            f"/api/endpoints/{endpoint_id}/docker/containers/{container_id}/logs",
-            {"stdout": "true", "stderr": "true", "tail": str(tail)},
-        )
+        """No ciclo, so INCREMENTAL (`since`): o log inteiro de cada container a cada ciclo e absurdo."""
+        params = {"stdout": "true", "stderr": "true", "tail": str(tail), "timestamps": str(timestamps).lower()}
+        if since is not None:
+            params["since"] = str(since)
+        resp = await self._fetch(f"/api/endpoints/{endpoint_id}/docker/containers/{container_id}/logs", params)
         return decode_docker_log(resp.content)
 
 

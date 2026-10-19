@@ -70,7 +70,8 @@ class TestToggleDeEstado:
         _mock_workflows([_wf("1", True, nodes=[{"id": "a", "name": "A", "type": "t"},
                                                  {"id": "b", "name": "B", "type": "t"}])])
         eventos = (await mon.check_structural_diff()).extra["eventos"]
-        assert sorted(e.event_type for e in eventos) == ["workflow_activated", "workflow_changed"]
+        # No novo SEM conexao nao muda o fluxo (score 1): refactor, aviso verde.
+        assert sorted(e.event_type for e in eventos) == ["workflow_activated", "workflow_refactored"]
 
     @respx.mock
     async def test_sem_mudanca_nao_gera_evento(self) -> None:

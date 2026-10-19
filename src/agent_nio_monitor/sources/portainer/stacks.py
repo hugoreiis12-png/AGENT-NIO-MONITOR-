@@ -11,7 +11,7 @@ from typing import Any
 import structlog
 
 from ...store.repository import EventRecord, Repository, new_event_id, now_utc
-from ..base import CollectorResult
+from ..base import CollectorResult, ainda_em_edicao, instante
 from .client import PortainerApiError, PortainerClient
 from .compose_diff import normalizar, proporcao_alterada, resumo_mudancas
 
@@ -21,10 +21,13 @@ log = structlog.get_logger(__name__)
 class StackCollector:
     source = "portainer"
 
-    def __init__(self, client: PortainerClient, repo: Repository, *, ratio_minimo: float = 0.20) -> None:
+    def __init__(
+        self, client: PortainerClient, repo: Repository, *, ratio_minimo: float = 0.20, quieto_minutos: int = 0,
+    ) -> None:
         self.client = client
         self.repo = repo
         self.ratio_minimo = ratio_minimo
+        self.quieto_minutos = quieto_minutos
 
     async def check_changes(self) -> CollectorResult:
         try:
@@ -45,6 +48,8 @@ class StackCollector:
         assinatura = {"update_date": stack.get("UpdateDate"), "updated_by": stack.get("UpdatedBy")}
         if anterior and all(anterior.get(k) == v for k, v in assinatura.items()):
             return None
+        if anterior and ainda_em_edicao(instante(stack.get("UpdateDate")), self.quieto_minutos, now_utc()):
+            return None  # redeploy em andamento: compara com a base antiga quando assentar
         try:
             conteudo = normalizar(await self.client.stack_file(stack["Id"]))
         except PortainerApiError as exc:
@@ -54,19 +59,20 @@ class StackCollector:
             source="portainer", kind="stack", external_id=str(stack["Id"]), name=stack.get("Name"),
             meta={**assinatura, "content": conteudo},
         )
-        if not baseline:
+        if not baseline or anterior is None:
+            # Stack nova chega como `container_created` (verde), agrupado pela stack: um aviso so.
             return None
         antes = (anterior or {}).get("content", "")
         proporcao = proporcao_alterada(antes, conteudo)
         if proporcao <= self.ratio_minimo:
             log.info("stack_alterada_abaixo_do_limite", stack=stack.get("Name"), proporcao=round(proporcao, 2))
             return None
-        return self._evento(stack, antes, conteudo, proporcao, nova=anterior is None)
+        return self._evento(stack, antes, conteudo, proporcao)
 
-    def _evento(self, stack: dict[str, Any], antes: str, depois: str, proporcao: float, *, nova: bool) -> EventRecord:
+    def _evento(self, stack: dict[str, Any], antes: str, depois: str, proporcao: float) -> EventRecord:
         nome = str(stack.get("Name"))
         pct = round(proporcao * 100)
-        resumo = "Stack nova criada." if nova else resumo_mudancas(antes, depois)
+        resumo = resumo_mudancas(antes, depois)
         return EventRecord(
             id=new_event_id(), ts=now_utc(), source=self.source, event_type="stack_changed", severity="high",
             title=f"Stack {nome} alterada ({pct}% do compose)", resource_id=str(stack.get("Id")),

@@ -6,6 +6,7 @@ from .agent import Agent
 from .config.loader import ConfigError
 from .config.schema import AppConfig
 from .store.db import Database
+from .store.maintenance import PartitionMaintenance
 from .store.postgres_queue import PostgresQueue
 from .store.postgres_repository import PostgresRepository
 from .store.repository import Repository
@@ -18,7 +19,8 @@ def build(cfg: AppConfig, repo: Repository | None = None) -> Agent:
     db.open()
     db.migrate()
     db.ensure_partitions()
-    return Agent(cfg, PostgresRepository(db), PostgresQueue(db))
+    manutencao = PartitionMaintenance(db, cfg.database.retention_days)
+    return Agent(cfg, PostgresRepository(db), PostgresQueue(db), maintenance=manutencao)
 
 
 def make_db(cfg: AppConfig) -> Database:

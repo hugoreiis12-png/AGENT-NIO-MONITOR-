@@ -5,7 +5,7 @@ from __future__ import annotations
 CAMPOS_DE_FATO = (
     ("workflow_nome", "Recurso"), ("recurso", "Recurso"), ("stack", "Stack"),
     ("ocorrencias", "Ocorrencias"), ("primeira", "Primeira falha"), ("ultima", "Ultima falha"),
-    ("no", "No que falhou"), ("erro", "Erro"), ("detalhe", "Detalhe"),
+    ("no", "No que falhou"), ("erro", "Erro"), ("detalhe", "Detalhe"), ("caminho", "Caminho executado"),
     ("resumo_diff", "Mudancas"), ("autor", "Ultima alteracao por"), ("logs", "Log recente"),
 )
 MAX_FATO = 1200

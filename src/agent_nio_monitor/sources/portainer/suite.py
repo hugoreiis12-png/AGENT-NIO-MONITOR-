@@ -33,6 +33,9 @@ def build_portainer(
     client = PortainerClient(env.url, api_key, verify_ssl=env.verify_ssl, timeout=env.timeout_seconds)
     return (
         ContainerCollector(client, repo, loop_count=t.restart_loop_count, loop_window_minutes=t.restart_loop_window_minutes),
-        StackCollector(client, repo, ratio_minimo=t.stack_change_ratio),
+        StackCollector(
+            client, repo, ratio_minimo=t.stack_change_ratio,
+            quieto_minutos=cfg.policy.aggregation.edicao_quieta_minutos,
+        ),
         ResourceCollector(client, repo, cpu_host_pct=t.cpu_host_pct, mem_pct=t.mem_pct, sustained_samples=t.sustained_samples),
     )

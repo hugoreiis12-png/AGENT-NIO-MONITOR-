@@ -41,24 +41,38 @@ class LlmClient:
     async def chat_json(self, system: str, user: str) -> dict[str, Any]:
         """Uma pergunta, uma resposta JSON. Sem "thinking": mede ~2 s contra ~6 s
         e o raciocinio nao entra no e-mail de qualquer jeito."""
+        return await self.chat_json_messages(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        )
+
+    async def chat_json_messages(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
+        mensagem = await self._chat({"messages": messages, "response_format": {"type": "json_object"}})
+        try:
+            dados = json.loads(THINK_RE.sub("", mensagem.get("content") or "").strip())
+        except ValueError as exc:
+            raise LLMUnavailable(f"JSON invalido: {exc}") from exc
+        if not isinstance(dados, dict):
+            raise LLMUnavailable("LLM devolveu JSON que nao e objeto")
+        return dados
+
+    async def chat_tools(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
+        """Uma rodada com ferramentas: a mensagem do assistente, com ou sem `tool_calls`.
+
+        Verificado em 19/10/2026: o vLLM deste Qwen ja sobe com o parser de tool call
+        no formato Hermes -- a chamada volta estruturada em `tool_calls`."""
+        return await self._chat({"messages": messages, "tools": tools, "tool_choice": "auto"})
+
+    async def _chat(self, extra: dict[str, Any]) -> dict[str, Any]:
         payload = {
-            "model": self.model,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "response_format": {"type": "json_object"},
-            "chat_template_kwargs": {"enable_thinking": False},
+            "model": self.model, "temperature": self.temperature, "max_tokens": self.max_tokens,
+            "chat_template_kwargs": {"enable_thinking": False}, **extra,
         }
         try:
             resp = await self._client.post(f"{self.base_url}/chat/completions", json=payload)
             resp.raise_for_status()
-            texto = resp.json()["choices"][0]["message"]["content"] or ""
-            dados = json.loads(THINK_RE.sub("", texto).strip())
+            return resp.json()["choices"][0]["message"]
         except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
             raise LLMUnavailable(f"{type(exc).__name__}: {exc}") from exc
-        if not isinstance(dados, dict):
-            raise LLMUnavailable("LLM devolveu JSON que nao e objeto")
-        return dados
 
     async def healthy(self) -> bool:
         try:

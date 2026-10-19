@@ -14,7 +14,7 @@ import structlog
 from ..config.schema import PollingConfig
 from ..health import HealthState
 from ..rules.engine import RuleEngine
-from ..store.queue import ENFILEIRADO, EVENTOS_DE_ESTADO, NotificationQueue, agora
+from ..store.queue import ENFILEIRADO, EVENTOS_DE_ESTADO, NotificationQueue, agora, janela_de_renotificacao
 from ..store.repository import EventRecord, Repository
 from .dispatcher import QueueDispatcher
 from .mailer import DispatchResult
@@ -51,7 +51,8 @@ class EventPipeline:
             if evento.detail.get("notificar") is False:
                 log.info("evento_registrado_sem_notificar", evento=evento.title, motivo=evento.detail.get("motivo_supressao"))
                 continue
-            renotifica = self.rules.re_notify_minutes(evento.event_type) if evento.event_type in EVENTOS_DE_ESTADO else 0
+            da_regra = self.rules.re_notify_minutes(evento.event_type) if evento.event_type in EVENTOS_DE_ESTADO else 0
+            renotifica = janela_de_renotificacao(evento, da_regra)
             pronto = agora_ + timedelta(seconds=espera_em_segundos(evento.event_type, self.polling))
             if self.queue.enqueue(evento, ready_at=pronto, renotify_minutes=renotifica, now=agora_) == ENFILEIRADO:
                 entraram += 1

@@ -32,6 +32,9 @@ def espera_em_segundos(event_type: str, polling: PollingConfig) -> float:
     ciclo = {
         "execution_failed": polling.execution_errors_seconds,
         "desktop_flow_failed": polling.execution_errors_seconds,
+        "desktop_flow_handled_errors": polling.execution_errors_seconds,
+        "node_not_executed": polling.execution_errors_seconds,
+        "node_error_hidden": polling.execution_errors_seconds,
         "container_stopped": polling.container_state_seconds,
         "container_unhealthy": polling.container_state_seconds,
         "container_removed": polling.container_state_seconds,
@@ -55,9 +58,9 @@ def _instante(texto: str | None) -> datetime | None:
 
 class ResolutionChecker:
     def __init__(self, *, containers: Any, resources: Any, n8n: Any, repo: Any, limites: ThresholdsConfig,
-                 desktop: Any = None) -> None:
+                 desktop: Any = None, deep: Any = None) -> None:
         self.containers, self.resources, self.n8n, self.repo, self.limites = containers, resources, n8n, repo, limites
-        self.desktop = desktop
+        self.desktop, self.deep = desktop, deep
 
     async def motivo(self, evento: EventRecord) -> str | None:
         """Motivo do descarte (o problema passou) ou None (continua: enviar)."""
@@ -118,3 +121,26 @@ class ResolutionChecker:
 
     _workflow_activated = _workflow_toggle
     _workflow_deactivated = _workflow_toggle
+
+    def _analise_posterior(self, e: EventRecord) -> Any:
+        """Ultima execucao de sucesso lida do workflow, se for DEPOIS da que gerou o alerta."""
+        analise = self.deep.caminhos.ultimo.get(e.resource_id) if self.deep else None
+        quando = _instante(e.detail.get("ultima_ts"))
+        return analise if analise and quando and analise.inicio > quando else None
+
+    async def _node_not_executed(self, e: EventRecord) -> str | None:
+        analise = self._analise_posterior(e)
+        voltaram = analise and set(e.detail.get("nos") or []) <= analise.rodaram
+        return "os nos voltaram a rodar na execucao seguinte" if voltaram else None
+
+    async def _node_error_hidden(self, e: EventRecord) -> str | None:
+        analise = self._analise_posterior(e)
+        limpo = analise and not set(e.detail.get("nos") or []) & analise.com_erro
+        return "execucao seguinte sem erro nesses nos" if limpo else None
+
+    async def _desktop_flow_handled_errors(self, e: EventRecord) -> str | None:
+        acoes = self.deep.acoes if self.deep else None
+        ultimo = acoes.ultimo_tratado.get(e.resource_id) if acoes else None
+        quando = _instante(e.detail.get("ultima_ts"))
+        limpo = ultimo and quando and ultimo[0] > quando and not ultimo[1]
+        return "sessao seguinte do RPA sem erro tratado" if limpo else None

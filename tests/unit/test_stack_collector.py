@@ -89,7 +89,8 @@ class TestMudancaDeStack:
         assert "hunter2" not in guardado
 
     @respx.mock
-    async def test_stack_nova_depois_da_linha_de_base_alerta(self) -> None:
+    async def test_stack_nova_nao_alerta_aqui_vira_container_criado(self) -> None:
+        """Stack nova sai como `container_created` (verde, agrupado pela stack): um aviso so."""
         repo = InMemoryRepository()
         _mock(_stack(), COMPOSE)
         await _coletor(repo).check_changes()
@@ -97,9 +98,7 @@ class TestMudancaDeStack:
             _stack(), {**_stack(nome="nova"), "Id": 9}]))
         respx.get(f"{PTAI}/api/stacks/9/file").mock(
             return_value=httpx.Response(200, json={"StackFileContent": COMPOSE}))
-        eventos = (await _coletor(repo).check_changes()).extra["eventos"]
-        assert [e.detail["stack"] for e in eventos] == ["nova"]
-        assert eventos[0].detail["resumo_diff"] == "Stack nova criada."
+        assert (await _coletor(repo).check_changes()).extra["eventos"] == []
 
     @respx.mock
     async def test_arquivo_indisponivel_tenta_de_novo_no_proximo_ciclo(self) -> None:

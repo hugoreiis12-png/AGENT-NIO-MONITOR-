@@ -41,6 +41,8 @@ LEASE_SEGUNDOS = 300
 EVENTOS_DE_ESTADO = frozenset({
     "execution_failed", "container_stopped", "container_unhealthy", "container_removed",
     "container_restart_loop", "container_resource_high", "reconciliation_gap", "desktop_flow_failed",
+    "node_not_executed", "node_error_hidden", "workflow_trigger_failed", "container_log_error",
+    "desktop_flow_handled_errors",
 })
 
 
@@ -82,9 +84,22 @@ def payload_para_evento(payload: dict[str, Any]) -> EventRecord:
     )
 
 
+# Alerta com incidente (o inicio do problema na chave) nao se repete enquanto o incidente
+# durar: so um incidente NOVO (o problema passou e voltou) alerta de novo. Medido em
+# 19/10/2026: o mesmo RPA quebrado gerou 9 e-mails, um a cada 12 h de janela vencida.
+SEM_REPETICAO_MINUTOS = RETENCAO_DIAS * 24 * 60
+
+
 def chave_de_dedup(evento: EventRecord) -> str:
     base = f"{evento.event_type}:{evento.resource_id or '-'}"
-    return base if evento.event_type in EVENTOS_DE_ESTADO else f"{base}:{evento.id}"
+    if evento.event_type not in EVENTOS_DE_ESTADO:
+        return f"{base}:{evento.id}"
+    incidente = evento.detail.get("incidente")
+    return f"{base}:{incidente}" if incidente else base
+
+
+def janela_de_renotificacao(evento: EventRecord, da_regra: int) -> int:
+    return SEM_REPETICAO_MINUTOS if evento.detail.get("incidente") else da_regra
 
 
 class NotificationQueue(Protocol):

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -51,9 +52,9 @@ class PollingConfig(BaseModel):
     stack_changes_seconds: float = Field(default=60.0, ge=25.0, le=60.0)
     queue_seconds: float = Field(default=10.0, ge=5.0, le=25.0)
     queue_max_delay_seconds: float = Field(default=50.0, ge=30.0, le=120.0)
-    reconciliation_seconds: float = Field(default=3600.0, gt=0)
-    digest_hour: int = Field(default=9, ge=0, le=23)
-    health_seconds: float = Field(default=30.0, gt=0)
+
+    # `forbid`: reconciliation_seconds, digest_hour e health_seconds eram aceitos e nunca lidos.
+    model_config = ConfigDict(extra="forbid")
 
 
 class MailConfig(BaseModel):
@@ -79,6 +80,10 @@ class LlmConfig(BaseModel):
     max_tokens: int = Field(default=700, ge=64)
     # Se o LLM cair, o alerta precisa sair assim mesmo -- com texto deterministico.
     fallback_to_template: bool = True
+    # Investigacao com ferramentas (tool calling no formato Hermes do vLLM) antes de redigir (ADR D42).
+    investigacao: bool = True
+    investigacao_max_passos: int = Field(default=4, ge=1, le=8)
+    investigacao_prazo_segundos: float = Field(default=75.0, ge=10.0, le=150.0)
 
 
 class DatabaseConfig(BaseModel):
@@ -90,6 +95,8 @@ class DatabaseConfig(BaseModel):
     )
     pool_min: int = Field(default=1, ge=1)
     pool_max: int = Field(default=8, ge=1)
+    # Dias de historico mantidos; None = nao apaga nada. Piso de 60 preserva o mes anterior inteiro.
+    retention_days: int | None = Field(default=None, ge=60)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -124,9 +131,12 @@ class AggregationConfig(BaseModel):
     e o que separa 24 emails/dia de 3-5.
     """
 
-    window_minutes: int = Field(default=60, ge=1)
-    min_occurrences: int = Field(default=1, ge=1)
+    # `forbid`: chave sem leitor no codigo e config que mente (window_minutes e min_occurrences eram).
+    model_config = ConfigDict(extra="forbid")
+
     re_notify_after_minutes: int = Field(default=240, ge=0)
+    # Alteracao (workflow, credencial, stack) so vira alerta depois de N min sem nova edicao.
+    edicao_quieta_minutos: int = Field(default=10, ge=0, le=120)
 
 
 class QuietHoursConfig(BaseModel):
@@ -145,11 +155,34 @@ class ThresholdsConfig(BaseModel):
     restart_loop_window_minutes: int = Field(default=10, ge=1)
     cpu_host_pct: float = Field(default=80.0, gt=0, le=100)
     mem_pct: float = Field(default=90.0, gt=0, le=100)
+    # Score de risco do diff (0-10) ate o qual a alteracao de workflow e refactor (alerta verde).
+    refactor_max_score: int = Field(default=1, ge=0, le=10)
     sustained_samples: int = Field(default=3, ge=1)
+
+
+class LogsConfig(BaseModel):
+    """Leitura dos logs dos containers (ADR D40): o que e erro novo, o que e pico e o que se ignora."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_containers_por_ciclo: int = Field(default=12, ge=1, le=100)
+    pico_minimo: int = Field(default=20, ge=1)
+    fator_de_pico: float = Field(default=5.0, ge=1.0)
+    container_n8n: str = "n8n"
+    # Container (ou "*") -> regex de linhas que nao sao erro de verdade.
+    ignorar: dict[str, list[str]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _regex_validas(self) -> LogsConfig:
+        for padroes in self.ignorar.values():
+            for padrao in padroes:
+                re.compile(padrao)
+        return self
 
 
 class PolicyConfig(BaseModel):
     thresholds: ThresholdsConfig = ThresholdsConfig()
+    logs: LogsConfig = LogsConfig()
     aggregation: AggregationConfig = AggregationConfig()
     quiet_hours: QuietHoursConfig = QuietHoursConfig()
     rules: list[NotificationRule] = Field(min_length=1)

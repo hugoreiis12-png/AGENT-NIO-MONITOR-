@@ -33,7 +33,7 @@ PREFIXO_DA_CHAVE = "pa:"
 ROTULO = "@OData.Community.Display.V1.FormattedValue"
 SELECT = ",".join((
     "flowsessionid", "statuscode", "startedon", "completedon", "errorcode", "errormessage",
-    "runmode", "_regardingobjectid_value", "_machineid_value",
+    "runmode", "_regardingobjectid_value", "_machineid_value", "rundetails",
 ))
 
 
@@ -49,6 +49,8 @@ class SessaoDesktop:
     maquina: str | None
     modo: str | None
     dono: str | None
+    # JSON com as fases do runtime e o estado do upload do log de acoes.
+    rundetails: str | None = None
 
     @property
     def chave(self) -> str:
@@ -80,6 +82,7 @@ def parse_sessao(raw: dict[str, Any]) -> SessaoDesktop | None:
         status=int(raw.get("statuscode") or 0), concluida_em=_instante(fim),
         erro_codigo=raw.get("errorcode"), erro_mensagem=raw.get("errormessage"),
         maquina=raw.get(f"_machineid_value{ROTULO}"), modo=raw.get(f"runmode{ROTULO}"), dono=_dono(raw),
+        rundetails=raw.get("rundetails"),
     )
 
 
@@ -129,7 +132,7 @@ class DesktopFlowCollector:
         return CollectorResult(
             collected=len(sessoes), failures=len(falhas),
             duration_ms=int((now_utc() - inicio).total_seconds() * 1000),
-            extra={"streaks": streaks, "ultimas_falhas": falhas},
+            extra={"streaks": streaks, "ultimas_falhas": falhas, "sessoes": sessoes},
         )
 
     async def _consultar(self, desde: datetime) -> list[dict[str, Any]]:

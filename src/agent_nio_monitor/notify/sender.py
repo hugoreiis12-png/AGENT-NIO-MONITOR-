@@ -32,7 +32,7 @@ async def enviar_alerta(
 
     destinatarios = await _destinatarios(evento, resolver, health)
     contexto = {
-        **evento.detail, "tipo": evento.event_type,
+        **evento.detail, "tipo": evento.event_type, "fonte": evento.source,
         "titulo": evento.title, "severidade": evento.severity,
     }
     mensagem = await compor(analyst, evento, contexto, cfg)

@@ -36,9 +36,6 @@ polling:
   stack_changes_seconds: 60
   queue_seconds: 10              # fila de disparo: reconfere e envia (nao le as fontes)
   queue_max_delay_seconds: 50    # alerta sai em ate 50 s depois de entrar na fila
-  reconciliation_seconds: 3600
-  digest_hour: 9
-  health_seconds: 30
 
 # Canal normal: webhook do n8n (mesmo host da instancia monitorada).
 # Canal de n8n morto: log no terminal (decisao do dono do projeto).
@@ -58,6 +55,13 @@ llm:
   temperature: 0.2
   max_tokens: 700
   fallback_to_template: true
+  # Investigacao (ADR D42): antes de redigir, o Qwen chama ferramentas SO de leitura (log,
+  # inspect, execucao, acoes do RPA) pelo tool calling Hermes do vLLM. Evidencia citada e
+  # conferida literalmente; sem ela a confianca e 'baixa'. Falhou ou estourou o prazo: cai
+  # na analise simples. Medido: 13-18 s por alerta.
+  investigacao: true
+  investigacao_max_passos: 4
+  investigacao_prazo_segundos: 75
 
 # Schema separado. NUNCA o mesmo database do n8n.
 database:
@@ -65,3 +69,6 @@ database:
   schema: "hermes"
   pool_min: 1
   pool_max: 8
+  # Retencao das tabelas particionadas (DROP PARTITION, irreversivel). null = guarda tudo.
+  # Decisao do dono; o runbook sugere 90. Minimo aceito: 60.
+  retention_days: null

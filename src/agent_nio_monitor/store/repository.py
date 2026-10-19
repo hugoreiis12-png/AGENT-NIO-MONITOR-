@@ -54,6 +54,8 @@ class FailureRecord:
     last_node: str | None = None
     run_data: Any = None
     truncated: bool = False
+    # Caminho no a no (texto redigido): vai para o alerta, nao para o banco.
+    caminho: str | None = None
 
 
 @dataclass

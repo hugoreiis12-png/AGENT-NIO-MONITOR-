@@ -37,6 +37,8 @@ class DispatchResult:
     recipients: list[str] = field(default_factory=list)
     error: str | None = None
     attempts: int = 0
+    # Falha transitoria do canal: a fila reagenda em vez de desistir.
+    retryable: bool = False
 
 
 class Notifier:
@@ -105,12 +107,13 @@ class Notifier:
                 log.warning(
                     "notificacao_falhou", tentativa=tentativa, erro=ultimo_erro
                 )
-        # Webhook pode ter falhado porque o proprio n8n esta fora. Nao descarta:
-        # cai para log, que e o canal declarado para esse cenario.
-        log.warning("webhook_indisponivel_caindo_para_log", erro=ultimo_erro)
-        resultado = self._to_log(recipients, subject, body, metadata)
-        resultado.attempts = self.max_attempts
-        return resultado
+        # n8n de pe e webhook falhando (workflow desativado, path errado) NAO e o
+        # cenario do log: virava `sent_to_log`, contava como enviado e sumia. A fila reagenda.
+        log.error("webhook_falhou_com_n8n_de_pe", erro=ultimo_erro, tentativas=self.max_attempts)
+        return DispatchResult(
+            status="failed", channel="n8n_webhook", recipients=recipients,
+            error=ultimo_erro, attempts=self.max_attempts, retryable=True,
+        )
 
     def _to_log(
         self, recipients: list[str], subject: str, body: str, metadata: dict | None

@@ -106,6 +106,18 @@ class TestFalhasDeEnvio:
         resultado = await _despachante(fila, ChecadorFixo(None), envio).tick(PRONTO)
         assert resultado["falhas"] == 1 and fila.items[0].status == FAILED
 
+    async def test_webhook_falhando_reagenda_e_depois_desiste(self) -> None:
+        fila = _fila_com_um_alerta()
+        falha = DispatchResult(status="failed", channel="n8n_webhook", error="404", retryable=True)
+        d = _despachante(fila, ChecadorFixo(None), Envio(*[falha] * 3), max_tentativas=3)
+        assert (await d.tick(PRONTO))["reagendados"] == 1
+        assert fila.items[0].status == "pending" and fila.items[0].attempts == 1
+        agora = PRONTO
+        for _ in range(2):
+            agora += timedelta(minutes=10)
+            await d.tick(agora)
+        assert fila.items[0].status == FAILED
+
     async def test_regra_sem_notificacao_descarta(self) -> None:
         fila = _fila_com_um_alerta()
         envio = Envio(DispatchResult(status="suppressed", channel="nenhuma"))

@@ -30,6 +30,8 @@ __all__ = ["Agent", "build", "main"]
 
 log = structlog.get_logger()
 
+# Particoes: 6 h deixa quatro chances por dia antes da virada do mes.
+MANUTENCAO_SEGUNDOS = 6 * 3600
 
 
 def local_timestamper(timezone: str = FUSO_NOME):  # noqa: ANN201 - processor do structlog
@@ -174,7 +176,10 @@ async def _agenda(agent: Agent, stop: asyncio.Event) -> None:
         "stacks": (p.stack_changes_seconds, agent.check_stacks),
         "containers_stats": (p.container_stats_seconds, agent.check_container_resources),
         "power_automate": (p.execution_errors_seconds, agent.check_power_automate),
+        "execution_paths": (p.execution_errors_seconds, agent.check_execution_paths),
+        "container_logs": (p.container_state_seconds, agent.check_container_logs),
         "fila": (p.queue_seconds, agent.flush_queue),
+        "particoes": (MANUTENCAO_SEGUNDOS, agent.maintain_partitions),
     }
     await asyncio.gather(
         *(_laco_do_job(nome, intervalo, funcao, stop) for nome, (intervalo, funcao) in jobs.items()),

@@ -30,7 +30,7 @@ from typing import Any
 import structlog
 
 from ...store.repository import EventRecord, Repository, new_event_id, now_utc
-from ..base import CollectorResult
+from ..base import CollectorResult, ainda_em_edicao, instante
 from .client import N8NApiError, N8NClient
 
 log = structlog.get_logger(__name__)
@@ -53,9 +53,10 @@ class CredentialCollector:
 
     source = "n8n"
 
-    def __init__(self, client: N8NClient, repo: Repository) -> None:
+    def __init__(self, client: N8NClient, repo: Repository, *, quieto_minutos: int = 0) -> None:
         self.client = client
         self.repo = repo
+        self.quieto_minutos = quieto_minutos
 
     async def check_credentials(self) -> CollectorResult:
         conhecidos = {r["external_id"]: r for r in self.repo.list_resources(self.source, KIND)}
@@ -80,9 +81,16 @@ class CredentialCollector:
                 collected=len(atuais), extra={"eventos": []}
             )
 
-        eventos = [e for e in (self._comparar(atuais, conhecidos).values()) if e is not None]
-        self._gravar(atuais)
+        # Credencial ainda sendo editada: nem alerta nem grava -- o proximo ciclo compara com a base antiga.
+        prontas = [c for c in atuais if not self._em_edicao(c, conhecidos)]
+        eventos = [e for e in (self._comparar(prontas, conhecidos).values()) if e is not None]
+        self._gravar(prontas)
         return CollectorResult(collected=len(atuais), extra={"eventos": eventos})
+
+    def _em_edicao(self, cred: dict[str, Any], conhecidos: dict[str, dict[str, Any]]) -> bool:
+        anterior = (conhecidos.get(str(cred.get("id") or "")) or {}).get("meta") or {}
+        mudou = str(cred.get("updatedAt") or "") != str(anterior.get("updated_at") or "")
+        return mudou and ainda_em_edicao(instante(cred.get("updatedAt")), self.quieto_minutos, now_utc())
 
     def _comparar(
         self, atuais: list[dict[str, Any]], conhecidos: dict[str, dict[str, Any]]

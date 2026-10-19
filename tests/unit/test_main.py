@@ -19,7 +19,7 @@ from agent_nio_monitor.capabilities import Capability, CapabilityReport
 from agent_nio_monitor.config.loader import ConfigError
 
 INTERVALO_CURTO = 0.01
-JOBS_DA_AGENDA = 8
+JOBS_DA_AGENDA = 11
 
 
 class _AgenteFalso:
@@ -66,6 +66,15 @@ class _AgenteFalso:
     async def check_power_automate(self) -> int:
         return await self._conta("check_power_automate")
 
+    async def check_execution_paths(self) -> int:
+        return await self._conta("check_execution_paths")
+
+    async def check_container_logs(self) -> int:
+        return await self._conta("check_container_logs")
+
+    async def maintain_partitions(self) -> int:
+        return await self._conta("maintain_partitions")
+
     async def run_capabilities(self) -> dict[str, int]:
         self.sondou = True
         return {}
@@ -109,7 +118,8 @@ class TestLacoDoJob:
 
 
 class TestAgenda:
-    async def test_todos_os_jobs_rodam_e_a_sonda_roda_uma_vez(self) -> None:
+    async def test_todos_os_jobs_rodam_e_a_sonda_roda_uma_vez(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(main_mod, "MANUTENCAO_SEGUNDOS", INTERVALO_CURTO)
         stop = asyncio.Event()
         agente = _AgenteFalso(stop)
 

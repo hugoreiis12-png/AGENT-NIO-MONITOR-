@@ -39,11 +39,11 @@ ESPERAS_SEGUNDOS = (30, 60, 120, 240)
 # ser ignorado.
 CONCORRENCIA = 4
 
-# Teto por item. Maior que a soma do pior caso de um item (timeout do LLM +
-# as 3 tentativas do webhook) para que o TEMPO DE RESPOSTA, e nao o timeout,
+# Teto por item. Maior que a soma do pior caso de um item (investigacao de 75 s +
+# timeout do LLM + as 3 tentativas do webhook) e menor que o lease da fila (300 s) para que o TEMPO DE RESPOSTA, e nao o timeout,
 # seja o que manda: cortando antes, um item lento viraria falha definitiva
 # enquanto ainda estava trabalhando.
-TIMEOUT_ITEM_SEGUNDOS = 180.0
+TIMEOUT_ITEM_SEGUNDOS = 240.0
 
 
 class QueueDispatcher:
@@ -137,6 +137,8 @@ class QueueDispatcher:
         if resultado.status == "suppressed":
             self.queue.mark_discarded(item.id, "regra: sem notificacao", now)
             return "descartados"
+        if resultado.retryable:
+            return self._reagendar(item, resultado.error or resultado.status, now)
         self.queue.mark_failed(item.id, resultado.error or resultado.status)
         return "falhas"
 

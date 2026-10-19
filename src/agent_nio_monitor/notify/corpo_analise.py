@@ -15,11 +15,12 @@ def corpo_com_analise(contexto: dict, acao_padrao: str, url_workflow: str = "") 
     analise = contexto["analise"]
     passos = analise.get("como_resolver") or [acao_padrao]
     numerados = "\n".join(f"{i}. {p}" for i, p in enumerate(passos, 1))
-    secoes = [
-        _secao("O que aconteceu", analise["resumo"]),
-        _secao("Causa provavel", analise["causa_provavel"]),
-        _secao("Como resolver", numerados),
-    ]
+    confianca = analise.get("confianca")
+    titulo_causa = f"Causa apurada (confianca {confianca})" if confianca else "Causa provavel"
+    secoes = [_secao("O que aconteceu", analise["resumo"]), _secao(titulo_causa, analise["causa_provavel"])]
+    if analise.get("evidencias"):
+        secoes.append(_secao("Evidencias", "\n".join(f"- {e}" for e in analise["evidencias"])))
+    secoes.append(_secao("Como resolver", numerados))
     detalhes = fatos(contexto, excluir=("stack", "autor"))
     if detalhes:
         secoes.append(_secao("Detalhes", detalhes))

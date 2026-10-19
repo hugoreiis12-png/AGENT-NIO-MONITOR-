@@ -12,9 +12,10 @@ aggregation:
   # Deduplicar NAO e o que limita o volume aqui. O que limita e quantos workflows
   # DISTINTOS estao quebrados -- 8. Cada um precisa de pelo menos 1 alerta, senao
   # o monitor deixa de detectar. O piso e 8, nao 5.
-  window_minutes: 60
-  min_occurrences: 1
   re_notify_after_minutes: 720
+  # Workflow/credencial/stack so alerta depois de 10 min sem nova edicao: a sessao de
+  # edicao inteira vira UM e-mail (medido: 7 e-mails de 'foi alterado' em 4 h).
+  edicao_quieta_minutos: 10
 
 quiet_hours:
   enabled: false
@@ -32,6 +33,10 @@ thresholds:
   # Loop de reinicio: N reinicios dentro da janela.
   restart_loop_count: 3
   restart_loop_window_minutes: 10
+  # Alteracao de workflow com score de risco (0-10, diff.risco_para_score) ate este valor e
+  # refactor: nao muda o resultado do fluxo (renomear no, mexer em versao, nota, posicao).
+  # Vai como aviso VERDE (workflow_refactored). Acima disso, workflow_changed (amarelo).
+  refactor_max_score: 1
   # Consumo: precisa ficar acima do limite por N coletas seguidas (coletas de 60 s).
   cpu_host_pct: 80      # % do CPU total do host usado pelo container
   mem_pct: 90           # % do limite de memoria do container
@@ -47,7 +52,7 @@ rules:
     severity: critical
     min_streak: 3
     notify: true
-    escalate_after_minutes: [15, 45]
+    escalate_after_minutes: [15, 45]   # INERTE: escalacao nao ligada (ADR D24)
     template: "workflow_failing"
     re_notify_after_minutes: 720
 
@@ -103,7 +108,7 @@ rules:
     event_types: ["container_stopped", "container_unhealthy"]
     severity: critical
     notify: true
-    escalate_after_minutes: [5]
+    escalate_after_minutes: [5]        # INERTE: escalacao nao ligada (ADR D24)
     template: "container_down"
 
   - name: "stack_alterada"
@@ -124,9 +129,10 @@ rules:
     notify: true
     template: "container_resource_high"
 
+  # Criacao e aviso VERDE (severidade baixa = tema verde do e-mail): registro, nao incidente.
   - name: "workflow_criado"
     event_types: ["workflow_created"]
-    severity: medium
+    severity: low
     notify: true
     template: "workflow_created"
 
@@ -154,3 +160,76 @@ rules:
     severity: low
     notify: true
     template: "workflow_activated"
+  # --- Coleta profunda (ADR D39-D41) -------------------------------------------
+  # Execucao VERDE com no em erro (continueOnFail / onError: continue).
+  - name: "erro_escondido_em_execucao"
+    event_types: ["node_error_hidden"]
+    severity: high
+    notify: true
+    template: "node_error_hidden"
+    re_notify_after_minutes: 720
+
+  # Etapa do caminho normal (roda em >=95% das ultimas 50 execucoes) que nao rodou.
+  - name: "etapa_do_fluxo_nao_rodou"
+    event_types: ["node_not_executed"]
+    severity: medium
+    notify: true
+    template: "node_not_executed"
+    re_notify_after_minutes: 720
+
+  # Gatilho do n8n falhando (lido no log do container). 3 na ultima hora: abaixo
+  # disso e reconexao normal de IMAP, nao incidente.
+  - name: "gatilho_falhando"
+    event_types: ["workflow_trigger_failed"]
+    severity: high
+    min_streak: 3
+    notify: true
+    template: "workflow_trigger_failed"
+    re_notify_after_minutes: 720
+
+  # Mensagem de erro NOVA no log de um container, ou pico de uma conhecida.
+  - name: "erro_no_log_do_container"
+    event_types: ["container_log_error"]
+    severity: medium
+    notify: true
+    template: "container_log_error"
+    re_notify_after_minutes: 720
+
+  # RPA verde com acao que falhou dentro de tratamento de erro.
+  - name: "rpa_com_erros_tratados"
+    event_types: ["desktop_flow_handled_errors"]
+    severity: medium
+    notify: true
+    template: "desktop_flow_handled_errors"
+    re_notify_after_minutes: 720
+
+  # --- Avisos verdes (criacao e refactor) ------------------------------------------
+  - name: "workflow_reorganizado"
+    event_types: ["workflow_refactored"]
+    severity: low
+    notify: true
+    template: "workflow_refactored"
+
+  - name: "container_criado"
+    event_types: ["container_created"]
+    severity: low
+    notify: true
+    template: "container_created"
+
+  - name: "fluxo_rpa_criado"
+    event_types: ["desktop_flow_created"]
+    severity: low
+    notify: true
+    template: "desktop_flow_created"
+
+# Leitura dos logs dos containers (ADR D40). A primeira leitura de cada container
+# so aprende as mensagens que ja existem; alerta e para mensagem NOVA ou pico.
+logs:
+  max_containers_por_ciclo: 12   # rodizio: 35 containers lidos a cada ~90 s
+  pico_minimo: 20                # pico precisa de pelo menos 20 linhas na leitura...
+  fator_de_pico: 5.0             # ...e 5x a media daquela mensagem
+  container_n8n: "n8n"           # de onde sai a falha de gatilho
+  # Regex por container (ou "*" para todos). Telemetria do n8n (PostHog) sem rede nao e incidente
+  # (visto na passada a seco de 19/10/2026).
+  ignorar:
+    n8n: ["PostHog"]

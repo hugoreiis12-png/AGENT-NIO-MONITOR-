@@ -99,7 +99,8 @@ def diff_workflows(
         campos = {k: (na.get(k), nb.get(k)) for k in set(na) | set(nb) if na.get(k) != nb.get(k)}
         # Parametro que so mudou de CHAVE e a mudanca que mais merece alerta:
         # tipico de "adicionaram uma senha hardcoded" ou "tiraram o retry".
-        risco = "param_keys" in campos or "type" in campos or "disabled" in campos
+        # `onError` decide se a falha para o fluxo ou passa em silencio: muda o resultado final.
+        risco = bool({"param_keys", "type", "disabled", "onError"} & campos.keys())
         mudancas.append(
             Change(
                 kind="node_changed_risky" if risco else "node_changed",
@@ -173,12 +174,24 @@ def risco_para_score(mudancas: list[Change]) -> tuple[int, list[str]]:
         elif m.kind == "node_changed_risky":
             pontos += 2
             fatores.append(f"node alterado em campo sensivel: {m.path}")
+        elif m.kind == "node_added" and _eh_gatilho(m.after):
+            # Gatilho novo comeca a disparar execucoes sozinho, mesmo sem conexao: nunca e refactor.
+            pontos += 3
+            fatores.append(f"gatilho adicionado: {m.path}")
         elif m.kind == "node_added" or m.kind == "conn_added":
             pontos += 1
         elif m.kind == "settings_changed" and m.path == "active":
             pontos += 2
             fatores.append("ativacao/desativacao")
     return min(10, pontos), fatores
+
+
+TIPOS_DE_GATILHO = frozenset({"webhook", "cron", "interval", "start", "manualTrigger"})
+
+
+def _eh_gatilho(no: Any) -> bool:
+    tipo = str((no or {}).get("type") or "").rsplit(".", 1)[-1] if isinstance(no, dict) else ""
+    return tipo.endswith("Trigger") or tipo in TIPOS_DE_GATILHO
 
 
 def autoria_de(workflow: dict[str, Any]) -> str | None:

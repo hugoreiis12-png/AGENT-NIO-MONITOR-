@@ -195,6 +195,9 @@ class TestPolicyReal:
             "stack_changed",
             "container_stopped", "container_unhealthy", "container_removed",
             "container_restart_loop", "container_resource_high",
+            "node_error_hidden", "node_not_executed", "workflow_trigger_failed",
+            "container_log_error", "desktop_flow_handled_errors",
+            "workflow_refactored", "container_created", "desktop_flow_created",
         }
         assert _emissores() == esperados, (
             "a lista de emissores derivados mudou de forma inesperada. "

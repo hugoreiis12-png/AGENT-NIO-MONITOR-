@@ -111,6 +111,22 @@ class DataverseClient:
             raise DataverseError(f"HTTP {resp.status_code}: {_mensagem_do_erro(resp)}", resp.status_code)
         return resp.json()
 
+    @retry(
+        retry=retry_if_exception(_deve_retryar),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=5),
+        reraise=True,
+    )
+    async def arquivo(self, recurso: str, coluna: str) -> bytes | None:
+        """Conteudo de uma coluna de arquivo (ex.: o log de acoes da sessao). None quando nao ha arquivo (404)."""
+        headers = {"Authorization": f"Bearer {await self._obter_token()}"}
+        resp = await self._client.get(f"{self.base_url}{API_PATH}{recurso}/{coluna}/$value", headers=headers)
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            raise DataverseError(f"HTTP {resp.status_code}: {_mensagem_do_erro(resp)}", resp.status_code)
+        return resp.content
+
 
 def _diagnostico_de_token(resp: httpx.Response) -> str:
     mensagem = _mensagem_do_erro(resp)

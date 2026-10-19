@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 
@@ -47,3 +47,22 @@ def dentro_de_quiet_hours(
     if inicio_min <= fim_min:
         return inicio_min <= agora_min < fim_min
     return agora_min >= inicio_min or agora_min < fim_min
+
+def instante(valor: str | int | float | None) -> datetime | None:
+    """ISO (n8n) ou epoch em segundos (Portainer) -> datetime UTC."""
+    if valor in (None, ""):
+        return None
+    if isinstance(valor, (int, float)):
+        return datetime.fromtimestamp(valor, UTC)
+    try:
+        return datetime.fromisoformat(str(valor).replace("Z", "+00:00")).astimezone(UTC)
+    except ValueError:
+        return None
+
+
+def ainda_em_edicao(quando: datetime | None, minutos: int, agora: datetime) -> bool:
+    """Alterado ha menos de `minutos`: espera a edicao terminar e alerta UMA vez com tudo.
+
+    Medido em 19/10/2026: o mesmo workflow gerou 7 e-mails de "foi alterado" em 4 h -- um
+    por save no editor."""
+    return minutos > 0 and quando is not None and agora - quando < timedelta(minutes=minutos)

@@ -15,6 +15,7 @@ from ...redaction import redact_text
 from ...store.repository import EventRecord, Repository, new_event_id, now_utc
 from ..base import CollectorResult, _erro_total_de_endpoints
 from .client import PortainerApiError, PortainerClient, parse_container
+from .created import CreatedContainers, evento_containers_criados
 from .donos import dono_da_stack, stack_do_container, stacks_por_nome
 from .lifecycle import LifecycleTracker
 from .metrics import eh_candidato_a_loop
@@ -39,6 +40,7 @@ class ContainerCollector:
         self._inspects_restantes = MAX_INSPECT_POR_CICLO
         self._atuais: dict[str, dict] = {}
         self._nomes: dict[int, set[str]] = {}
+        self.criados = CreatedContainers(repo)
 
     def estado_atual(self, container_id: str) -> dict | None:
         """Container como visto no ULTIMO ciclo (None se nao apareceu): a fila usa para
@@ -79,6 +81,7 @@ class ContainerCollector:
                 continue
             total += len(rows)
             eventos.extend(await self._processar_endpoint(int(endpoint["Id"]), rows, stacks))
+            eventos.extend(self._eventos_de_criacao(int(endpoint["Id"]), rows, stacks))
 
         return CollectorResult(
             collected=total,
@@ -117,6 +120,12 @@ class ContainerCollector:
             container_id, now_utc(), state=container["state"], health=container["health"], restart_count=reinicios,
         )
         return eventos
+
+    def _eventos_de_criacao(self, endpoint_id: int, rows: list[dict], stacks: dict[str, dict]) -> list[EventRecord]:
+        return [
+            evento_containers_criados(endpoint_id, grupo, novos, dono_da_stack(grupo, stacks))
+            for grupo, novos in self.criados.novos(endpoint_id, rows).items()
+        ]
 
     def _transicoes(self, container: dict, anterior: dict | None, dono: dict) -> list[EventRecord]:
         container_id, nome = container["container_id"], container["name"]

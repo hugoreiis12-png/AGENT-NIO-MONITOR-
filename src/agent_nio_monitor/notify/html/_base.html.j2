@@ -43,8 +43,15 @@
     <p style="margin:0;font-size:16px;line-height:23px;">{{ resumo }}</p>
 
     {% if causa %}
-    {{ secao("Causa provável") }}
+    {{ secao("Causa apurada · confiança " ~ confianca if confianca else "Causa provável") }}
     <p style="margin:0;font-size:15px;line-height:22px;">{{ causa }}</p>
+    {% endif %}
+
+    {% if evidencias %}
+    {{ secao("Evidências") }}
+    {% for evidencia in evidencias %}
+    <p style="margin:0 0 6px;padding:6px 10px;border-left:3px solid {{ tema.cor }};background:#F7F3EA;font-family:Consolas,Menlo,monospace;font-size:12px;line-height:18px;word-break:break-word;">{{ evidencia }}</p>
+    {% endfor %}
     {% endif %}
 
     {% if passos %}

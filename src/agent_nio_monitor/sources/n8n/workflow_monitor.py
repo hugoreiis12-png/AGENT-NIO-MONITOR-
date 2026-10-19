@@ -12,7 +12,7 @@ from typing import Any
 import structlog
 
 from ...store.repository import Change, EventRecord, Repository, new_event_id, now_utc
-from ..base import CollectorResult
+from ..base import CollectorResult, ainda_em_edicao, instante
 from .client import N8NApiError, N8NClient
 from .diff import autoria_de, diff_workflows, resumo, risco_para_score
 
@@ -26,9 +26,13 @@ def _eh_toggle(mudanca: Change) -> bool:
 class WorkflowMonitor:
     source = "n8n"
 
-    def __init__(self, client: N8NClient, repo: Repository) -> None:
+    def __init__(
+        self, client: N8NClient, repo: Repository, *, refactor_max_score: int = 1, quieto_minutos: int = 0,
+    ) -> None:
         self.client = client
         self.repo = repo
+        self.refactor_max_score = refactor_max_score
+        self.quieto_minutos = quieto_minutos
 
     async def check_structural_diff(
         self, *, name_by_id: dict[str, str] | None = None
@@ -77,6 +81,11 @@ class WorkflowMonitor:
         mudancas: list[Change] = diff_workflows(anterior["body"], workflow)
         if not mudancas:
             return []  # snapshot equivalente ao atual: gravar de novo so incharia o banco
+        # Ativacao/desativacao nao espera; edicao em andamento sim -- o snapshot antigo fica
+        # como base e o alerta sai com TODAS as mudancas da sessao de edicao.
+        quando = instante(workflow.get("updatedAt"))
+        if not any(_eh_toggle(m) for m in mudancas) and ainda_em_edicao(quando, self.quieto_minutos, now_utc()):
+            return []
 
         eventos = []
         if any(_eh_toggle(m) for m in mudancas):
@@ -106,13 +115,16 @@ class WorkflowMonitor:
         self, workflow: dict[str, Any], workflow_id: str, nome: str, mudancas: list[Change]
     ) -> EventRecord:
         pontos, fatores = risco_para_score(mudancas)
+        # Score ate o limite = reorganizacao que nao muda o resultado do fluxo (alerta verde).
+        refactor = pontos <= self.refactor_max_score
+        tipo = "workflow_refactored" if refactor else "workflow_changed"
         return EventRecord(
             id=new_event_id(),
             ts=now_utc(),
             source=self.source,
-            event_type="workflow_changed",
-            severity="medium",
-            title=f"{nome} foi alterado",
+            event_type=tipo,
+            severity="low" if refactor else "medium",
+            title=f"{nome} foi reorganizado (sem impacto no fluxo)" if refactor else f"{nome} foi alterado",
             resource_id=workflow_id,
             changes=mudancas,
             detail={
@@ -134,7 +146,7 @@ class WorkflowMonitor:
             ts=now_utc(),
             source=self.source,
             event_type="workflow_created",
-            severity="medium",
+            severity="low",
             title=f"{nome} foi criado",
             resource_id=workflow_id,
             detail={
