@@ -141,16 +141,19 @@ class ContainerLogCollector:
         return any(p.search(texto) for p in padroes)
 
     def _registrar_no_catalogo(self, nome: str, leitura: Leitura, *, alertar: bool, dono: dict) -> list[EventRecord]:
-        eventos = []
+        """Atualiza o catalogo e devolve no maximo UM evento para o container."""
+        achados: list[tuple[str, int, str, str]] = []
         catalogo = self._carregar_catalogo()
         for sig, n in leitura.contagem.items():
             conhecido = catalogo.get(f"{nome}:{sig}")
             motivo = self._motivo(conhecido, n)
             self._atualizar(nome, sig, leitura.amostras[sig], n, conhecido)
             if alertar and motivo:
-                logs = "\n".join(leitura.linhas[sig])[-MAX_LOG_NO_ALERTA:]
-                eventos.append(evento_log_de_erro(nome, sig, n, leitura.amostras[sig], motivo, logs, dono))
-        return eventos
+                achados.append((sig, n, leitura.amostras[sig], motivo))
+        if not achados:
+            return []
+        logs = "\n".join(linha for sig, *_ in achados for linha in leitura.linhas[sig])[-MAX_LOG_NO_ALERTA:]
+        return [evento_log_de_erro(nome, achados, logs, dono)]
 
     def _motivo(self, conhecido: dict | None, n: int) -> str | None:
         if conhecido is None:

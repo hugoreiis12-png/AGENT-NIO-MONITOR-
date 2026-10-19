@@ -121,3 +121,27 @@ class TestEdicaoConsolidada:
         await mon.check_structural_diff()
         rota.mock(return_value=httpx.Response(200, json={"data": [_wf([], agora, ativo=False)]}))
         assert [e.event_type for e in (await mon.check_structural_diff()).extra["eventos"]] == ["workflow_deactivated"]
+
+
+class TestWebhookLento:
+    """Caso real de 19/10/2026: o webhook do n8n so responde depois do SMTP; 3 ReadTimeout + 1
+    sucesso mandaram o mesmo 'Container parado: hfbrasil-preco' ate 4 vezes."""
+
+    @respx.mock
+    async def test_sem_resposta_no_prazo_e_entrega_presumida_sem_reenvio(self) -> None:
+        from agent_nio_monitor.notify.mailer import Notifier
+
+        rota = respx.post("http://n8n.test/webhook/x").mock(side_effect=httpx.ReadTimeout("lento"))
+        async with Notifier(webhook_url="http://n8n.test/webhook/x", max_attempts=3) as n:
+            r = await n.send(recipients=["a@b.c"], subject="s", body="b")
+        assert rota.call_count == 1, "um POST que chegou nao pode ser repetido"
+        assert r.status == "sent" and not r.retryable and "presumida" in (r.error or "")
+
+    @respx.mock
+    async def test_conexao_recusada_ainda_tenta_de_novo(self) -> None:
+        from agent_nio_monitor.notify.mailer import Notifier
+
+        rota = respx.post("http://n8n.test/webhook/x").mock(side_effect=httpx.ConnectError("recusada"))
+        async with Notifier(webhook_url="http://n8n.test/webhook/x", max_attempts=3) as n:
+            r = await n.send(recipients=["a@b.c"], subject="s", body="b")
+        assert rota.call_count == 3 and r.status == "failed" and r.retryable

@@ -62,7 +62,8 @@ class MailConfig(BaseModel):
 
     webhook_url: str
     webhook_path: str = "/webhook/agent-nio-monitor"
-    timeout_seconds: float = Field(default=15.0, gt=0)
+    # O webhook so responde depois que o SMTP envia (responseMode lastNode): 15 s nao bastava.
+    timeout_seconds: float = Field(default=60.0, gt=0)
     max_attempts: int = Field(default=3, ge=1, le=10)
     # Imagens do e-mail HTML (logo e herois) ficam hospedadas; sem isso o e-mail
     # ainda mostra todo o texto, so perde a arte.

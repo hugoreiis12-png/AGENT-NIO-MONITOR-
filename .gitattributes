@@ -1,0 +1,4 @@
+# Fim de linha LF no repositorio E na copia local (Windows com core.autocrlf=true gerava CRLF).
+* text=auto eol=lf
+*.png binary
+*.jpg binary

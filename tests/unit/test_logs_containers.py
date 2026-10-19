@@ -89,13 +89,29 @@ class TestColetor:
         portainer.logs["api"] = [_linha(2, "Erro registrado. Origem: X | Tentativas: 1")]
         assert (await coletor.check_logs()).extra["eventos"] == []
 
-    async def test_mensagem_nova_alerta_uma_vez_por_assinatura(self) -> None:
+    async def test_mensagem_nova_alerta_com_chave_do_container(self) -> None:
         portainer, coletor = await _semeado(api=[_linha(1, "Erro registrado. Origem: X")])
         portainer.logs["api"] = [_linha(2, "Traceback: KeyError 'cliente'"), _linha(3, "Traceback: KeyError 'cliente'")]
         eventos = (await coletor.check_logs()).extra["eventos"]
         assert [e.event_type for e in eventos] == ["container_log_error"]
         assert eventos[0].detail["ocorrencias"] == 2 and "erro novo" in eventos[0].title
-        assert eventos[0].resource_id.startswith("api:")
+        assert eventos[0].resource_id == "api"
+
+    async def test_um_traceback_de_varias_linhas_vira_um_alerta_so(self) -> None:
+        """Caso real de 19/10/2026: um ForeignKeyViolation no integracao-dfe-xml virou 13 e-mails."""
+        portainer, coletor = await _semeado(dfe=[_linha(1, "INFO sincronizacao iniciada")])
+        portainer.logs["dfe"] = [_linha(17, texto) for texto in (
+            "[ERROR] services.sap.sap_db - INV1 -> Erro SQLAlchemy: (psycopg2.errors.ForeignKeyViolation)",
+            "Traceback (most recent call last):",
+            'psycopg2.errors.ForeignKeyViolation: ERRO: viola restricao de chave estrangeira "FK_OINV"',
+            "The above exception was the direct cause of the following exception:",
+            "sqlalchemy.exc.IntegrityError: (psycopg2.errors.ForeignKeyViolation) ERRO: insercao em INV1",
+            "[ERROR] routers.cargas_sap_router - Sincronizacao interrompida devido a falha em dependencia.",
+        )]
+        eventos = (await coletor.check_logs()).extra["eventos"]
+        assert len(eventos) == 1 and eventos[0].resource_id == "dfe"
+        assert len(eventos[0].detail["assinaturas"]) == 6, "6 linhas de erro distintas, UM alerta"
+        assert "ForeignKeyViolation" in eventos[0].detail["detalhe"]
 
     async def test_linha_ja_lida_no_mesmo_segundo_nao_conta_de_novo(self) -> None:
         portainer, coletor = await _semeado(api=[_linha(5, "INFO pronto")])

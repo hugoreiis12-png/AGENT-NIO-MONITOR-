@@ -546,3 +546,16 @@ E limitacao de LICENCA, nao de credencial. Consequencia pratica: o caminho pela 
 **Ajustes no score para "refactor" nao mentir:** mudar `onError` passou a ser campo de risco (decide se a falha para o fluxo ou passa em silencio); gatilho novo soma 3 (dispara execucoes sozinho, mesmo sem conexao).
 **Stack nova** nao gera mais `stack_changed` ("Stack nova criada", vermelho): sai como `container_created` verde, um aviso so.
 **Limite conhecido (anterior a esta decisao):** a projecao do diff guarda so as CHAVES dos parametros, nao os valores -- trocar uma URL ou query nao aparece como mudanca nenhuma.
+
+---
+
+## D45 - Webhook sem resposta e entrega presumida; erro de log e um alerta por container
+
+**Medido em producao em 19/10/2026, 20 min depois do deploy do D43:**
+1. `Container parado: hfbrasil-preco`: 3 POSTs com `ReadTimeout` + 1 com sucesso para o MESMO evento. O workflow de envio do n8n responde no ultimo no (`responseMode: lastNode`), DEPOIS do SMTP; o SMTP passou dos 15 s, o agente repetiu e o e-mail saiu ate 4 vezes. O D37 (falha retentavel) agravou: antes ia para o log.
+2. `integracao-dfe-xml`: um unico traceback de `ForeignKeyViolation` virou 13 assinaturas -- e 13 alertas na fila no mesmo segundo.
+**Decisao:**
+- `ReadTimeout` = a requisicao chegou, so a resposta nao veio: status `sent` com "entrega presumida", SEM reenvio. Falha de conexao e 5xx (nao chegou / n8n recusou) seguem retentaveis. Timeout de leitura 60 s, conexao 10 s.
+- `container_log_error` agrupa todas as mensagens novas/em pico de UMA leitura num evento por container; chave de dedup = container.
+**Trade-off aceito:** entrega presumida e "no maximo uma vez": se o n8n recebeu e falhou no SMTP depois do timeout, o alerta se perde (fica `sent` com o erro registrado). Preferido a mandar o mesmo e-mail 4 vezes.
+**Junto:** `.gitattributes` com `eol=lf` -- o `git switch` no Windows (`core.autocrlf=true`) reescrevia a copia local em CRLF e quebrava 65 testes de encoding.

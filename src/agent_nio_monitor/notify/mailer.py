@@ -28,6 +28,7 @@ import structlog
 log = structlog.get_logger(__name__)
 
 LOG_PREFIX = "HERMES-ALERTA"
+CONEXAO_SEGUNDOS = 10.0
 
 
 @dataclass
@@ -52,7 +53,8 @@ class Notifier:
     ) -> None:
         self.webhook_url = webhook_url
         self.max_attempts = max_attempts
-        self._client = httpx.AsyncClient(timeout=timeout, verify=verify_ssl)
+        # Conexao curta (servidor fora cai rapido em nova tentativa); leitura longa (espera o SMTP).
+        self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=CONEXAO_SEGUNDOS), verify=verify_ssl)
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -101,6 +103,14 @@ class Notifier:
                 return DispatchResult(
                     status="sent", channel="n8n_webhook", recipients=recipients,
                     attempts=tentativa,
+                )
+            except httpx.ReadTimeout as exc:
+                # O POST CHEGOU; so a resposta nao veio (o webhook responde depois do SMTP).
+                # Repetir mandava o MESMO e-mail de novo: medido em 19/10/2026, 4 copias de um alerta.
+                log.warning("notificacao_entrega_presumida", tentativa=tentativa, erro=str(exc))
+                return DispatchResult(
+                    status="sent", channel="n8n_webhook", recipients=recipients, attempts=tentativa,
+                    error="sem resposta do webhook no prazo: entrega presumida, sem reenvio",
                 )
             except httpx.HTTPError as exc:
                 ultimo_erro = f"{type(exc).__name__}: {exc}"
