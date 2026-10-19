@@ -179,7 +179,7 @@ Formato: decisão · alternativas descartadas · por quê · trade-off aceito ·
 
 ---
 
-## Fase 1 (2026-10-14) - Astra da fiaao
+## Fase 1 (2026-10-14) - Auditoria da fiacao
 
 Auditoria de arquitetura achou 11 nomes (eventos, capacidades, funcoes) presentes em configuracao, template, ADR ou docstring e **sem nenhum emissor em `src/`**. Entre eles, os tres que um monitor nao pode perder: buraco de reconciliacao, `n8n_up` e destinatario global.
 
@@ -275,7 +275,7 @@ Fase 1 liga seis. As decisoes que nao sao obvias:
 
 **A auditoria afirmou:** `bump_streak` nao tinha chave de idempotencia; um replay de coleta contaria a mesma falha duas vezes e a regra `min_streak: 3` chegaria a `critical` sobre uma falha so.
 
-**A afirmacao estava errada.** A guarda existe um nivel acima: `ExecutionErrorCollector._process` so adiciona a `novos` o que `execution_exists()` instancia de verificar.
+**A afirmacao estava errada.** A guarda existe um nivel acima: `ExecutionErrorCollector._process` so adiciona a `novos` o que `execution_exists()` acabou de verificar como novo.
 
 **Tentativa e reversao:** adicionei `workflow_streak.last_counted_execution_id` com `WHERE ... IS DISTINCT FROM EXCLUDED...` e a migration 005. Duas medicoes contrariam o ganho:
 
@@ -284,7 +284,7 @@ Fase 1 liga seis. As decisoes que nao sao obvias:
 
 Resultado: uma coluna, uma migration e uma sensacao de protecao -- sem protecao. Revertido.
 
-**Descartado:** `record_failure` devolvendo `bool` ("foi novo?"). Seria correto e nao precisaria de migration, mas nao ha bug para corrigir: ajouter mecanismo sem falha nomeada e o que a propria regra do projeto proibe.
+**Descartado:** `record_failure` devolvendo `bool` ("foi novo?"). Seria correto e nao precisaria de migration, mas nao ha bug para corrigir: adicionar mecanismo sem falha nomeada e o que a propria regra do projeto proibe.
 
 **Como fica protegido daqui para frente:** `tests/integration/test_postgres_live.py::TestStreakNaoInfla` fixa o comportamento real -- `bump_streak` NAO e idempotente, e `execution_exists` e quem e.
 
@@ -298,9 +298,9 @@ Resultado: uma coluna, uma migration e uma sensacao de protecao -- sem protecao.
 
 **`due()` com lease, nao com status novo:** `UPDATE ... SET next_attempt_at = now + lease WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED LIMIT n) RETURNING *`. Antes era `SELECT *` puro: nada mudava, entao uma segunda leitura devolvia a mesma linha e mandava o mesmo e-mail duas vezes. Seguro so porque `main._agenda` mantem UM laco serializado.
 
-**Por que lease e nao `status='sending'`:** exigiria mexer no CHECK de `notification_queue.status` (migration 004) e criaria uma TERCEIRA fonte de verdade sobre a fase do item. `next_attempt_at` ja significa "quando volta a ser elegivel". Efeito colateral boo: se o processo morre no meio do envio, o item volta sozinho quando o lease expira.
+**Por que lease e nao `status='sending'`:** exigiria mexer no CHECK de `notification_queue.status` (migration 004) e criaria uma TERCEIRA fonte de verdade sobre a fase do item. `next_attempt_at` ja significa "quando volta a ser elegivel". Efeito colateral bom: se o processo morre no meio do envio, o item volta sozinho quando o lease expira.
 
-**`LEASE_SEGUNDOS = 300`**, acima do backoff maximo de reenvio (240 s) e do timeout do LLM (60 s) mais as 3 tentativas do webhook. Lease MENOR que o tempo de um envio faria um segundo despachante roubar o item em voo. Trado por teste.
+**`LEASE_SEGUNDOS = 300`**, acima do backoff maximo de reenvio (240 s) e do timeout do LLM (60 s) mais as 3 tentativas do webhook. Lease MENOR que o tempo de um envio faria um segundo despachante roubar o item em voo. Travado por teste.
 
 **`enqueue` com `ON CONFLICT (dedup_key) WHERE status='pending' DO NOTHING`:** o indice parcial e UNIQUE, entao o predicado no `ON CONFLICT` e obrigatorio para o Postgres inferir o indice. Sem isso, dois enqueues concorrentes da mesma chave caem os dois no INSERT; um levanta `UniqueViolation`, sobe ate `EventPipeline.enqueue` e e engolido por `main._laco_do_job` -- o evento fica gravado em `event` e **NUNCA e enfileirado**. A constraint convertia corrida em perda de dado em vez de retry. O `rowcount` do INSERT distingue ENFILEIRADO de ATUALIZADO, entao quem perde a corrida recebe o resultado verdadeiro em vez de excecao.
 
@@ -339,7 +339,7 @@ A requisicao que chegava durante o store nao ficava LENTA: ficava **INALCANCAVEL
 
 **O defeito:** iteracao serial com `await` dentro. Por item, `motivo()` pode chamar a API do n8n e `dispatch()` espera o LLM (60 s) mais 3 tentativas de webhook. Com 50 itens prontos, um tick muito ultrapassa o intervalo da fila -- ela cresce em vez de drenar.
 
-**Teto 4, alto de proposito:** cada item em voo pode segurar uma chamada de LLM e uma conexao HTTP.
+**Teto 4, baixo de proposito:** cada item em voo pode segurar uma chamada de LLM e uma conexao HTTP.
 
 **180 s por item, maior que o pior caso (45 s de webhook + 60 s de LLM):** cortar antes faria um item lento virar falha definitiva enquanto ainda trabalhava.
 
@@ -353,7 +353,7 @@ A requisicao que chegava durante o store nao ficava LENTA: ficava **INALCANCAVEL
 
 ## D29 - `people.yaml: global` preenchido; `people.yaml:projects` e o caminho REAL
 
-**Decisao:** `global:` recebe Hugo Reis, Rafael Barboza e Carlos Henrique. Sao os MESMOS donos de projeto, de proposito -- o fallback e o time responsavel usado quando nao ha projeto a quem atribuir.
+**Decisao:** `global:` recebe Hugo Reis (unico nome desde o commit `8fc9934`; uma versao anterior deste texto listava tambem Rafael Barboza e Carlos Henrique, o que o `people.yaml` nunca teve). Rafael e Carlos seguem recebendo pelos seus projetos e pela fonte `powerautomate`.
 
 **Correcao de um diagnostico anterior:** a auditoria e o D20 disseram que `/api/v1/projects` falhava por falta de papel admin na chave. **Errado.** A resposta real da instancia, verificada nesta sessao:
 
@@ -365,7 +365,7 @@ E limitacao de LICENCA, nao de credencial. Consequencia pratica: o caminho pela 
 
 **Por que isso importava mais do que parecia:** `reconciliation_gap` (D19) nao tem `tenant_id`. Sem `global`, ele era o evento mais importante do sistema nascendo sem destinatario. Com D29, ele sai.
 
-**O que a fiação NAO entregava:** D20 ligou o codigo em marcoes, mas com a lista vazia o resultado era identico ao anterior. So agora a entrega e real. `test_projeto_desconhecido_agora_chega_alguem` fixa isso; `test_o_fallback_global_nao_esta_vazio` impede regressao para lista vazia -- que `test_config.py` nao pegaria (email invalido no YAML nao quebra YAML).
+**O que a fiação NAO entregava:** D20 ligou o codigo, mas com a lista vazia o resultado era identico ao anterior. So agora a entrega e real. `test_projeto_desconhecido_agora_chega_alguem` fixa isso; `test_o_fallback_global_nao_esta_vazio` impede regressao para lista vazia -- que `test_config.py` nao pegaria (email invalido no YAML nao quebra YAML).
 
 ---
 
@@ -387,7 +387,7 @@ E limitacao de LICENCA, nao de credencial. Consequencia pratica: o caminho pela 
 
 **Formato verificado antes de codar** (nao suposto): `GET /api/v1/credentials` na instancia real responde HTTP 200 com 39 itens e os campos `id`, `name`, `type`, `createdAt`, `updatedAt`, `shared`.
 
-**`shared` e descartado antes de gravar.** Traz `Endereco nio@grupocampanha.com.br <nio@...>` com papel de acesso -- e-mail de pessoa. Nao ha o que redactar se o dado nunca e guardado: o alerta leva a **quantidade** de quem tem acesso, nunca **quem**. Trado por tres testes (no banco, no alerta, e o `meta` gravado).
+**`shared` e descartado antes de gravar.** Traz `Endereco nio@grupocampanha.com.br <nio@...>` com papel de acesso -- e-mail de pessoa. Nao ha o que redactar se o dado nunca e guardado: o alerta leva a **quantidade** de quem tem acesso, nunca **quem**. Travado por tres testes (no banco, no alerta, e o `meta` gravado).
 
 **Nao existe campo de autoria.** A API nao diz QUEM alterou, so QUEM tem acesso. O alerta fala do que mudou e quando, e o texto diz explicitamente que nao sabe quem -- um "Quem alterou" vazio seria pior que a linha ausente.
 
@@ -414,7 +414,7 @@ E limitacao de LICENCA, nao de credencial. Consequencia pratica: o caminho pela 
 
 **Nao resolvido, e conhecido:** o cluster de resolucao de dono pelo Portainer (`resolver.resolve_for_portainer_resource` e `resolver.union`, tambem sem chamador) permanece. A diferenca: a docstring do modulo afirma que a definicao do dono e "n8n OU Portainer", o que hoje e verdade so pela metade. Corrigir a docstring e apagar as funcoes e uma mudanca de contrato do modulo -- decisao propria, fora desta passagem de higiene.
 
-**A regra que guia:** complexidade sem falha nomeada nao fica. `reconciliation_gap`, `save_capabilities`, `Escalator` e `source_down`(o ADR D7 original) tinham exatamente este formato -- teste passa, nada produz. Codigo morto que e **testado** e o pior tipo, porque parece caredado.
+**A regra que guia:** complexidade sem falha nomeada nao fica. `reconciliation_gap`, `save_capabilities`, `Escalator` e `source_down`(o ADR D7 original) tinham exatamente este formato -- teste passa, nada produz. Codigo morto que e **testado** e o pior tipo, porque parece cuidado.
 
 ---
 
@@ -440,6 +440,8 @@ E limitacao de LICENCA, nao de credencial. Consequencia pratica: o caminho pela 
 
 ## D35 - Power Automate entra pelo Dataverse, com o `nio-fabric-sp` so-leitura
 
+> **Substituido em parte pelo D36:** a fonte de execucao e `flowsession` (fluxos de desktop), nao `flowruns`/`category eq 5`. Acesso, service principal e funcao continuam valendo.
+
 **Decisao:** a fonte Power Automate le o Dataverse do ambiente (`flowruns`, `flowevents`, `workflows` com `category eq 5`) por client credentials do service principal `nio-fabric-sp`, com um secret SO do monitor e um usuario de aplicativo com a funcao `NIO Monitor Leitura` (Read em nivel Organization em Flow Run, Flow Event, Process, User e Organization -- esta ultima so para ler a retencao configurada; nada de escrita).
 **Descartado:** Application Insights como fonte de alerta (so em ambiente gerenciado, entrega em ate 24 h); Purview (so ciclo de vida, nunca execucao); API `api.flow.microsoft.com` (nao documentada -- o mesmo risco que o D2 registra); System Administrator para o SP (a criacao por API sempre o concede -- por isso o cadastro e pela interface).
 **Por que o secret separado:** rotacao e revogacao independentes do Fabric; um vazamento aqui nao obriga a girar o secret do NIO-CLI.
@@ -459,3 +461,88 @@ E limitacao de LICENCA, nao de credencial. Consequencia pratica: o caminho pela 
 **Destinatario (decisao do dono, 14/10/2026):** SO a lista `fontes: powerautomate` do `people.yaml` (rafael.barboza e carlos.henrique). O dono da sessao (`owninguser`) e a conta tecnica `NaturalFarms@rpanf.onmicrosoft.com`, que ninguem le -- segue visivel no e-mail como "Responsavel pelo fluxo", mas nao recebe. Travado por `test_alerta_de_rpa_sai_no_padrao_para_os_destinatarios_da_fonte`.
 **Privilegios adicionais na funcao:** Read (Organization) em `flowsession`, `flowmachine`, `flowmachinegroup` -- concedidos por `AddPrivilegesRole` com login do admin, porque `Flow Run` nao aparece no editor de funcoes deste ambiente.
 **Sem botao no e-mail por enquanto:** o link do Power Automate exige o ID do ambiente, que nao esta na config.
+
+---
+
+## D37 - Webhook falhando com o n8n de pe e falha retentavel, nao `sent_to_log`
+
+**Decisao:** o `Notifier` so cai para o log quando `n8n_up` e falso (D8). Com o n8n de pe, webhook esgotando as tentativas devolve `failed` com `retryable=True`; o `QueueDispatcher` reagenda (30/60/120/240 s) e desiste depois de 5 tentativas.
+**O defeito:** o caminho antigo devolvia `sent_to_log` para QUALQUER falha de webhook. A fila marcava o item como enviado, o streak recebia `last_notified_at` e a janela de 720 min suprimia o proximo alerta. Workflow de e-mail desativado ou path errado = todo alerta "enviado" para um stderr sem leitor.
+**Por que 4xx tambem retenta:** 404 de webhook e quase sempre o workflow de envio desativado -- estado que alguem corrige em minutos. Desistir na primeira perderia o alerta; o teto de 5 tentativas limita o custo.
+**Fora daqui, por decisao:** canal alternativo (SMTP direto ou sentinela) para o proprio workflow de envio. Pendente.
+**Travado por:** `test_webhook_quebrado_com_n8n_de_pe_e_falha_retentavel` e `test_webhook_falhando_reagenda_e_depois_desiste`.
+
+---
+
+## D38 - Particoes mantidas em runtime; retencao opcional
+
+**Decisao:** job `particoes` a cada 6 h chama `ensure_partitions(2)` e, se `database.retention_days` estiver definido (minimo 60), `drop_partitions_older_than`.
+**O defeito:** `ensure_partitions` so rodava no boot e cobre ate o mes seguinte. Um agente sem reinicio desde outubro falharia todo INSERT em `event`/`execution`/`notification` a partir de 1/12 -- sem particao, sem DEFAULT.
+**Retencao desligada por padrao:** DROP PARTITION e irreversivel; quanto guardar e decisao do dono (`retention_days: null` ate la).
+**Junto:** `polling` e `aggregation` passaram a `extra="forbid"`; os campos sem leitor (`reconciliation_seconds`, `digest_hour`, `health_seconds`, `window_minutes`, `min_occurrences`) sairam do schema e dos YAMLs.
+
+---
+
+## D39 - n8n no a no: execucao verde tambem e lida
+
+**Medido em 19/10/2026:** o n8n guarda as execucoes de SUCESSO (114 na ultima hora, 93 de um webhook; ~23 KB cada com `includeData`). O payload traz `workflowData` (versao que rodou) e `runData` por no. 17 nos dos workflows ativos estao com `onError: continue*`/`continueOnFail` -- erro neles deixa a execucao verde.
+**Decisao:** coletor `ExecutionPathCollector` (job `execution_paths`, 30 s) le cada execucao de sucesso nova (marca d'agua por id, ate 60 por ciclo, `manual` ignorada) e emite:
+- `node_error_hidden` (alto): no com erro em execucao verde (erro na entrada do no, ou `json.error` no item quando o no esta em "continuar em erro");
+- `node_not_executed` (medio): no do CAMINHO NORMAL que nao rodou, com a causa subindo o grafo ate o primeiro no que rodou ("IF mandou os itens por outra saida", "devolveu 0 itens", "entregou itens e mesmo assim nao rodou").
+**Caminho normal, e nao "todo no do workflow":** a sonda mostrou que o unico no ausente nas execucoes verdes era um `stopAndError` -- ramo de erro, ausente de proposito. Caminho normal = nos que rodaram em >=95% das ultimas 50 execucoes do workflow, com no minimo 20 amostras. Guardado em `resource` (kind `node-baseline`, `meta.janela`): sem migration.
+**Primeira passada so aprende.** Alerta de falha (`execution_failed`) ganhou o "Caminho executado" no a no.
+**Reconferencia:** a execucao seguinte que rodou os nos (ou sem erro neles) descarta o alerta pendente.
+**Validado a seco contra a instancia:** 60 execucoes aprendidas, 0 alerta falso ao reanalisar as recentes.
+
+---
+
+## D40 - Logs dos containers: a unidade e a assinatura, nao a linha
+
+**Medido em 19/10/2026:** 35 containers, ~10 mil linhas no tail de 500, 13 com linha de erro; um com 239 linhas da MESMA mensagem. O container do n8n registra `The trigger node "X" of workflow "Y" failed` -- falha de gatilho NAO gera execucao e nenhum outro coletor a via.
+**Decisao:** `ContainerLogCollector` (job `container_logs`, 30 s) le incremental (`since` + `timestamps`, cursor por container em `source_cursor` scope `logs`), em rodizio de 12 containers por ciclo (~90 s para os 35).
+- Linha e erro pelo NIVEL declarado quando existe (`WARNING ... falhou` nao e erro), senao por palavra-chave; JSON pelo `level`/`error`.
+- Assinatura = mensagem com data, uuid, hex, url e numero normalizados. Catalogo em `resource` (kind `log-signature`) com amostra, total e media por leitura.
+- `container_log_error` (medio): assinatura NUNCA vista, ou pico (>= 20 linhas e >= 5x a media). Dedup por (container, assinatura).
+- `workflow_trigger_failed` (alto, `min_streak: 3`): falhas de gatilho do workflow na ultima hora. Abaixo de 3 e reconexao normal de IMAP. `_decidir` passou a repassar `streak_count` ao `RuleEngine`.
+- Primeira leitura de cada container so SEMEIA o catalogo (tail 500), sem alertar.
+**Ruido esperado no inicio:** mensagens raras que nao estavam no tail de 500 geram um "erro novo" cada na primeira vez. O ajuste e `policy.yaml: logs.ignorar` (regex por container). Na passada a seco, a telemetria do PostHog no n8n ja entrou la.
+
+---
+
+## D41 - RPA por fase e por acao
+
+**Medido em 19/10/2026:** `rundetails` traz cada fase do runtime (fila, atribuicao, conexao, execucao...) e `logDetails.uploadStatus`; a coluna de arquivo `additionalcontext` traz o log de CADA acao (`name`, subfluxo, indice, `status`, `insideErrorHandling`), ~27 KB, expira em ~28 dias. `flowlogs` (log V2) recusa consulta sem a sessao pai -- nao usado. As 17 falhas das ultimas 24 h foram `NoCandidateMachine`, antes de executar.
+**Decisao:** `LeitorDeAcoes` aprofunda cada sessao nova: falha ganha fase, significado do codigo (`NoCandidateMachine`, `WindowsIdentityIncorrect`) e, quando executou, a acao que falhou. Sessao VERDE com acao falhando dentro de tratamento de erro vira `desktop_flow_handled_errors` (medio). Log que ainda nao subiu fica pendente (ate 10 ciclos); sessao que nao executou nunca fica pendente.
+**NAO VERIFICADO com dado real:** o campo de erro de uma acao com falha -- nenhuma acao fora de `Succeeded` nas 60 sessoes lidas. O parser tenta `error`, `errorMessage`, `exception`, `message`. Conferir no primeiro alerta real.
+
+---
+
+## D42 - Qwen investiga antes de redigir (tool calling Hermes)
+
+**Verificado em 19/10/2026:** o vLLM do Qwen (`RedHatAI/Qwen3.8-27B-INT4`, 61k de contexto) ja sobe com o parser de tool call no formato Hermes -- a chamada volta estruturada em `tool_calls` em 0,5 s.
+**Decisao:** `Investigator` (`llm/investigator.py`) roda antes da analise simples: ate 4 rodadas (3 chamadas cada) e 75 s, com ferramentas SO DE LEITURA escolhidas pela fonte do evento (`investigation_tools.py`): n8n (`execucao_n8n`, `ultimas_execucoes_n8n`, `log_do_container`), Portainer (`log_do_container` com filtro, `inspecionar_container` com exit code/OOMKilled/healthcheck -- nunca `Env`), RPA (`sessoes_rpa`, `acoes_da_sessao_rpa`). Saida redigida, ate 6 mil caracteres; erro de ferramenta vira texto, nunca excecao.
+**Contra alucinacao:** cada evidencia citada precisa aparecer LITERALMENTE (a menos de espaco/caixa) numa saida de ferramenta ou nos fatos; o resto e descartado. Sem evidencia conferida, `confianca` = "baixa". Numero que nao esta no que o modelo leu rejeita a investigacao inteira (mesma regra do D3). O e-mail mostra "Causa apurada (confianca X)" e as evidencias.
+**O que NAO muda (D3):** o modelo nao decide severidade, destinatario nem se o alerta sai. Confianca baixa e informacao para quem le, nao filtro.
+**Fallback:** investigacao que falha, estoura o prazo ou nao se sustenta cai na analise so dos fatos; ela tambem falhando, texto deterministico. `TIMEOUT_ITEM_SEGUNDOS` do despachante subiu para 240 s (abaixo do lease de 300 s).
+**Validado contra producao:** alerta FORJADO de loop de reinicio -> 8 chamadas, "nao foi possivel confirmar", confianca baixa. RPA real -> 3 chamadas, "nenhuma maquina disponivel: o agente da NOTEAUTSAP nao esta conectado", confianca alta, 2 evidencias conferidas e 2 descartadas. 13-18 s por alerta.
+
+---
+
+## D43 - Um alerta por incidente; edicao vira um alerta so
+
+**Medido no banco de producao em 19/10/2026:** nenhum `event_id` foi enviado duas vezes. A repeticao vinha de dois desenhos: (1) `workflow_changed`/`credential_updated`/`stack_changed` sao FATO, entao cada save no editor era um e-mail (`MB Email IMAP foi alterado` 7x em 4 h; `SMTP AUTOMACAO` 3x em 4 min); (2) estado que continua era reenviado a cada 12 h de janela vencida (o mesmo RPA 9x de 14 a 17/10).
+**Decisao:**
+- Evento de estado com `detail.incidente` (o INICIO do problema) tem o incidente na chave de dedup e janela de re-notificacao do tamanho da retencao da fila: o mesmo incidente nunca reenvia; incidente novo (o problema passou e voltou) alerta. Emissores: `execution_failed` e `desktop_flow_failed` (`streak.first_at`), `node_*` e erro tratado do RPA (aberto ate uma execucao limpa), `workflow_trigger_failed` (abre com a janela de 1 h vazia).
+- O streak do n8n passa a ENCERRAR: execucao de sucesso mais nova que a ultima falha chama `resolve_streak` (antes so o RPA encerrava; o n8n acumulava para sempre e nao havia "incidente").
+- Workflow, credencial e stack so alertam depois de `aggregation.edicao_quieta_minutos` (10) sem nova edicao, comparando com a base de ANTES da sessao de edicao: um e-mail com todas as mudancas. Ativar/desativar nao espera.
+**Trade-off aceito:** a escalada de severidade dentro do mesmo incidente (1 falha = alto, 3 = critico) nao gera segundo e-mail. Incidentes de caminho/gatilho/erro tratado vivem em memoria: um reinicio do agente pode repetir um aviso uma vez.
+**Nao resolvido, a observar:** `Credencial alterada: IMAP account` 6x em 3 dias -- se for renovacao automatica de token OAuth mexendo no `updatedAt`, a janela de edicao nao cobre.
+
+---
+
+## D44 - Avisos verdes: criacao e refactor
+
+**Decisao:** severidade `low` (tema verde "Tudo certo!") para `workflow_created`, `container_created` (nome nunca visto no endpoint, agrupado pela stack; recriar com o mesmo nome nao conta; endpoint visto pela primeira vez so semeia), `desktop_flow_created` (fluxo de desktop novo, category 6) e `workflow_refactored`: alteracao de workflow com `risco_para_score` <= `thresholds.refactor_max_score` (1).
+**Ajustes no score para "refactor" nao mentir:** mudar `onError` passou a ser campo de risco (decide se a falha para o fluxo ou passa em silencio); gatilho novo soma 3 (dispara execucoes sozinho, mesmo sem conexao).
+**Stack nova** nao gera mais `stack_changed` ("Stack nova criada", vermelho): sai como `container_created` verde, um aviso so.
+**Limite conhecido (anterior a esta decisao):** a projecao do diff guarda so as CHAVES dos parametros, nao os valores -- trocar uma URL ou query nao aparece como mudanca nenhuma.

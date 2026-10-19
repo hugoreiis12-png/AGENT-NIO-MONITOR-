@@ -10,15 +10,18 @@ $env:DATABASE_DSN="postgresql://usuario:senha@host:5432/hermes"
 .\.venv\Scripts\python.exe -m agent_nio_monitor.main doctor
 ```
 
-O `doctor` é o passo que substitui suposição. Ele imprime a versão vinda de
-`/healthz` e o resultado de cada sonda.
+O `doctor` é o passo que substitui suposição. Ele imprime o resultado de cada
+sonda (esta instância do n8n não expõe versão: `/healthz` devolve só o status).
 
 ### Credenciais
 
-- **n8n:** a key precisa ser **owner/admin** para `/users` e `/projects/{id}/users`.
-  Sem isso o agente cai no fallback `config/people.yaml` e registra isso no log.
-- **Portainer:** precisa ser **admin** para `/api/users` (sem isso, resolução de
-  responsável por Portainer não funciona).
+- **n8n:** `/projects` responde 403 por **limite de licença**
+  (`feat:projectRole:admin`), não por papel da key (ADR D29). Trocar a key não
+  resolve: `config/people.yaml` (`projects:`) é o caminho normal de destinatário.
+- **Portainer:** o dono de stack/container vem dos **labels** do container
+  (ADR D34); `/api/users` só aparece como capacidade no `doctor`.
+- **Power Automate:** `POWERAUTOMATE_*` (service principal `nio-fabric-sp`, ADR D35/D36).
+  Sem elas só o ciclo de RPA fica desligado.
 
 ---
 
@@ -35,12 +38,18 @@ Instale em uma máquina **diferente** da que roda o Hermes:
   || logger -t HERMES "HERMES-MORTO: sem heartbeat ha mais de 5min"
 ```
 
-E um shipper consumindo o alerta em stderr:
+E um consumidor do alerta em stderr. No deploy atual (stack do Portainer) o
+stderr vai para o log do container `agent-nio-monitor`:
 
 ```bash
-# journald: journalctl -f -t hermes  (ou equivalente)
-# Loki/Elastic: filtrar por prefixo "HERMES-ALERTA"
+# no host do Docker (ou pelo Portainer: Containers > agent-nio-monitor > Logs)
+docker logs -f agent-nio-monitor 2>&1 | grep --line-buffered "HERMES-ALERTA"
+# Loki/Elastic: coletar o log do container e filtrar pelo prefixo "HERMES-ALERTA"
 ```
+
+O stderr só recebe alerta com o **n8n fora** (ADR D8). Webhook falhando com o n8n
+de pé não vai para o log: a fila reagenda e, após 5 tentativas, o item fica
+`failed` em `notification_queue` (ADR D37).
 
 > O `healthz` responde **503** quando alguma fonte está stale (não coletando há
 > mais de 10 min) ou quando o n8n está fora. Isso distingue "processo vivo" de
@@ -50,15 +59,24 @@ E um shipper consumindo o alerta em stderr:
 
 ## 3. Retenção
 
-Partições são criadas para 2 meses à frente no boot. Para reter mais:
+O agente mantém as partições sozinho (ADR D38): no boot e a cada 6 h garante o
+mês anterior, o corrente e o seguinte. A retenção é opcional, em
+`config/environments.yaml`:
+
+```yaml
+database:
+  retention_days: 90   # null = guarda tudo; mínimo 60
+```
+
+Com o valor definido, o mesmo job roda `drop_partitions_older_than` (log
+`particoes_removidas`). `DROP PARTITION` é instantâneo e **irreversível**;
+`DELETE` em massa sobre tabela particionada não libera espaço e trava o vacuum.
+Manualmente:
 
 ```sql
 SELECT hermes.ensure_partitions(4);          -- 4 meses à frente
 SELECT * FROM hermes.drop_partitions_older_than(90);
 ```
-
-Agende `drop_partitions_older_than` mensalmente. `DROP PARTITION` é instantâneo;
-`DELETE` em massa sobre tabela particionada não libera espaço e trava o vacuum.
 
 ---
 
@@ -66,11 +84,16 @@ Agende `drop_partitions_older_than` mensalmente. `DROP PARTITION` é instantâne
 
 | Sintoma | Onde olhar |
 |---|---|
-| Nenhum email chega | `SELECT status, recipients, error FROM hermes.notification ORDER BY ts DESC LIMIT 20;` |
+| Nenhum email chega | `SELECT status, recipients, error FROM hermes.notification ORDER BY ts DESC LIMIT 20;` — `failed` com 404 no webhook = workflow de envio desativado no n8n |
 | Alerta não saiu / saiu atrasado | `SELECT status, event_type, resolved_reason, last_error FROM hermes.notification_queue ORDER BY created_at DESC LIMIT 20;` — `discarded` com motivo = o problema passou antes do envio; `pending` parado = veja `/healthz` → `queue` |
 | Destinatário errado | log `destinatario_por_fallback` — mostra `fonte` e `motivo` |
 | Eventos sumindo | `SELECT * FROM hermes.reconciliation_run ORDER BY run_at DESC LIMIT 20;` — `gaps > 0` ou `cursor_valid = false` |
 | Erro de coleta | `SELECT * FROM hermes.source_cursor;` — `consecutive_failures` |
+| Alerta de "etapa nao rodou" falso | `SELECT name, jsonb_array_length(meta->'janela') FROM hermes.resource WHERE kind = 'node-baseline';` — o caminho normal so vale com 20+ execucoes; workflow alterado reaprende sozinho |
+| Erro de log ruidoso | acrescente uma regex em `policy.yaml: logs.ignorar.<container>`; catalogo em `SELECT name, meta FROM hermes.resource WHERE kind = 'log-signature';` |
+| Gatilho do n8n nao dispara | alerta `workflow_trigger_failed` (lido do log do container `n8n`); 3 falhas na hora para alertar |
+| Causa errada no e-mail | log `investigacao_concluida` (chamadas, evidencias, descartadas, confianca) ou `investigacao_interrompida`; `llm.investigacao: false` desliga e volta a analise so dos fatos |
+| Alerta que "deveria ter repetido" | um alerta por incidente (ADR D43): so reenvia quando o problema passa e volta. `notification_queue.dedup_key` mostra o incidente |
 | LLM caindo | log `llm_indisponivel_usando_fallback` + `status = 'fallback'` na notificação |
 | Bandeira | `SELECT max(started_at) FROM hermes.execution;` — se não avança, a coleta parou |
 
@@ -92,8 +115,10 @@ rules:
     severity: critical
     min_streak: 3
     re_notify_after_minutes: 720     # maior = menos repetição
-    escalate_after_minutes: [15, 45]
 ```
+
+`escalate_after_minutes` aparece em algumas regras, mas é **inerte**: a escalação
+não está ligada (ADR D24). Mudar o valor não muda nada.
 
 Depois de ajustar, rode:
 

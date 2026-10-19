@@ -95,6 +95,27 @@ $env:SKIP_LLM_TESTS="1"; .\.\.venv\Scripts\python.exe -m pytest -q   # sem LLM
 
 ---
 
+## Coleta profunda (ADR D39–D41)
+
+| Fonte | O que é lido | Alerta novo |
+|---|---|---|
+| n8n | Cada execução **com sucesso**, nó a nó (`runData` + `workflowData`) | `node_error_hidden` (erro em execução verde), `node_not_executed` (etapa do caminho normal que não rodou, com a causa no grafo). Falha de execução ganha o caminho executado |
+| Portainer | Log incremental de cada container, por assinatura de mensagem | `container_log_error` (mensagem nova ou pico), `workflow_trigger_failed` (gatilho do n8n falhando, lido do log do container) |
+| Power Automate | Fase do runtime e log de cada ação da sessão | Falha diz a fase, o significado do código e a ação; `desktop_flow_handled_errors` (sessão verde com erro tratado) |
+
+Aprendizado e catálogo ficam na tabela `resource` (sem migration nova). Ruído de log se ajusta
+em `policy.yaml: logs.ignorar`.
+
+## Investigação, sem duplicidade e avisos verdes (ADR D42–D44)
+
+- **Qwen investiga antes de enviar:** com o tool calling Hermes do vLLM, lê log, inspect do
+  container, execução do n8n e ações do RPA, e só então escreve a causa. Cada evidência citada é
+  conferida literalmente no que ele leu; o e-mail mostra "Causa apurada (confiança X)".
+- **Um alerta por incidente:** o mesmo problema não reenvia enquanto durar; edição de
+  workflow/credencial/stack vira um e-mail só, 10 min depois do último save.
+- **Verdes:** criação de workflow, container e fluxo de RPA, e refactor de workflow (score de
+  risco ≤ `refactor_max_score`).
+
 ## Notificações: fila, e-mail HTML e tempos
 
 - **Fila interna de disparo** (`notification_queue`, migration 004). Nada sai na hora: o evento
