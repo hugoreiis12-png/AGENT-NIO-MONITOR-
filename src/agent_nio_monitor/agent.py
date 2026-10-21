@@ -24,6 +24,7 @@ from .notify.resolution import ResolutionChecker
 from .notify.people import exclusive_by_source, exclusive_by_workflow, fallback_de_emergencia, people_by_project, portainer_users
 from .notify.resolver import RecipientResolver
 from .notify.sender import enviar_alerta
+from .notify.smtp_fallback import build_smtp_fallback
 from .rules.engine import RuleEngine
 from .sources.n8n.collector import ExecutionErrorCollector
 from .sources.n8n.credentials import CredentialCollector
@@ -72,6 +73,7 @@ class Agent:
             timeout=cfg.mail.timeout_seconds,
             max_attempts=cfg.mail.max_attempts,
             verify_ssl=cfg.active.n8n.verify_ssl,
+            fallback=build_smtp_fallback(cfg.mail.smtp),
         )
         self.resolver = RecipientResolver(
             build_n8n(cfg),

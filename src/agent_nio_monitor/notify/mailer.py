@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
+
+if TYPE_CHECKING:
+    from .smtp_fallback import SmtpFallback
 
 log = structlog.get_logger(__name__)
 
@@ -50,9 +53,11 @@ class Notifier:
         timeout: float = 15.0,
         max_attempts: int = 3,
         verify_ssl: bool = False,
+        fallback: SmtpFallback | None = None,
     ) -> None:
         self.webhook_url = webhook_url
         self.max_attempts = max_attempts
+        self.fallback = fallback
         # Conexao curta (servidor fora cai rapido em nova tentativa); leitura longa (espera o SMTP).
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=CONEXAO_SEGUNDOS), verify=verify_ssl)
 
@@ -117,12 +122,21 @@ class Notifier:
                 log.warning(
                     "notificacao_falhou", tentativa=tentativa, erro=ultimo_erro
                 )
-        # n8n de pe e webhook falhando (workflow desativado, path errado) NAO e o
-        # cenario do log: virava `sent_to_log`, contava como enviado e sumia. A fila reagenda.
-        log.error("webhook_falhou_com_n8n_de_pe", erro=ultimo_erro, tentativas=self.max_attempts)
+        return await self._sem_webhook(recipients, subject, body, html, ultimo_erro)
+
+    async def _sem_webhook(
+        self, recipients: list[str], subject: str, body: str, html: str | None, erro: str | None
+    ) -> DispatchResult:
+        # n8n de pe e webhook esgotado nao e o cenario do log (D37): tenta a reserva SMTP (D46), senao a fila reagenda.
+        if self.fallback is not None:
+            reserva = await self.fallback.send(recipients=recipients, subject=subject, body=body, html=html)
+            if reserva.status == "sent":
+                return replace(reserva, error=f"webhook falhou ({erro}); entregue por SMTP direto")
+            erro = f"{erro} | smtp: {reserva.error}"
+        log.error("webhook_falhou_com_n8n_de_pe", erro=erro, tentativas=self.max_attempts)
         return DispatchResult(
             status="failed", channel="n8n_webhook", recipients=recipients,
-            error=ultimo_erro, attempts=self.max_attempts, retryable=True,
+            error=erro, attempts=self.max_attempts, retryable=True,
         )
 
     def _to_log(

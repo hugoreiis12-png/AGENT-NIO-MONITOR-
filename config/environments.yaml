@@ -45,6 +45,12 @@ mail:
   # Arte do e-mail HTML (assets/email no repositorio, servida pelo GitHub).
   assets_base_url: "https://raw.githubusercontent.com/hugoreiis12-png/AGENT-NIO-MONITOR-/main/assets/email"
   support_email: "help@jfcagro.com.br"
+  # Canal de reserva (D46): so usado quando o webhook acima falha. Usuario/senha vem do ambiente.
+  smtp:
+    host: "pop.grupocampanha.com.br"
+    port: 465
+    seguranca: ssl
+    from_address: "nio@grupocampanha.com.br"
 
 # O LLM ANALISA o erro e REDIGE o alerta. Nao decide severidade nem destinatario.
 # Qwen no vLLM local (API compativel com OpenAI).

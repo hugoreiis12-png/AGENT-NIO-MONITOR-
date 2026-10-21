@@ -1,26 +1,46 @@
-# Stack do Portainer (deploy por Git). As variaveis abaixo sao preenchidas no
-# proprio Portainer (Stack > Environment variables) -- segredo NUNCA vai no repo.
+
+# Stack do Portainer (deploy por Git).
+# As variáveis abaixo são preenchidas no próprio Portainer
+# (Stack > Environment variables). Segredos NUNCA devem ir para o repositório.
+
 services:
   agent-nio-monitor:
     build: .
     image: agent-nio-monitor:latest
     container_name: agent-nio-monitor
     restart: unless-stopped
+
     environment:
       N8N_API_KEY: ${N8N_API_KEY:?defina N8N_API_KEY}
       PORTAINER_API_KEY: ${PORTAINER_API_KEY:?defina PORTAINER_API_KEY}
       DATABASE_DSN: ${DATABASE_DSN:?defina DATABASE_DSN}
-      # Opcionais: sem elas o ciclo do Power Automate (RPA) fica desligado, o resto sobe.
+
+      # Opcionais: sem elas, o ciclo do Power Automate (RPA) fica desligado.
+      # O restante da aplicação continua funcionando.
       POWERAUTOMATE_TENANT_ID: ${POWERAUTOMATE_TENANT_ID:-}
       POWERAUTOMATE_CLIENT_ID: ${POWERAUTOMATE_CLIENT_ID:-}
       POWERAUTOMATE_CLIENT_SECRET: ${POWERAUTOMATE_CLIENT_SECRET:-}
+
+      # Configuração de logs
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      # Configuração SMTP (opcional)
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+
     ports:
       - "8099:8099"
+
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8099/healthz/ready', timeout=8)"]
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u; u.urlopen('http://127.0.0.1:8099/healthz/ready', timeout=8)"
       interval: 60s
       timeout: 10s
       retries: 5
-      # O primeiro ciclo (backfill) pode segurar o servidor de saude por alguns minutos.
+
+      # O primeiro ciclo (backfill) pode manter o serviço
+      # sem responder ao healthcheck por alguns minutos.
       start_period: 300s

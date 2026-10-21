@@ -57,6 +57,20 @@ class PollingConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class SmtpConfig(BaseModel):
+    """SMTP direto (D46): so entra quando o webhook do n8n esgota. Senha so por variavel."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = Field(min_length=1)
+    port: int = Field(default=587, ge=1, le=65535)
+    seguranca: Literal["starttls", "ssl", "nenhuma"] = "starttls"
+    from_address: str = Field(min_length=3)
+    username_env: str = "SMTP_USERNAME"
+    password_env: str = "SMTP_PASSWORD"
+    timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+
+
 class MailConfig(BaseModel):
     """Regra de canal (ADR do plano): n8n no caminho normal, log no n8n morto."""
 
@@ -69,6 +83,7 @@ class MailConfig(BaseModel):
     # ainda mostra todo o texto, so perde a arte.
     assets_base_url: str = ""
     support_email: str = ""
+    smtp: SmtpConfig | None = None
 
 
 class LlmConfig(BaseModel):
