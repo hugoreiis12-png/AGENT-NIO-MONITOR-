@@ -559,3 +559,15 @@ E limitacao de LICENCA, nao de credencial. Consequencia pratica: o caminho pela 
 - `container_log_error` agrupa todas as mensagens novas/em pico de UMA leitura num evento por container; chave de dedup = container.
 **Trade-off aceito:** entrega presumida e "no maximo uma vez": se o n8n recebeu e falhou no SMTP depois do timeout, o alerta se perde (fica `sent` com o erro registrado). Preferido a mandar o mesmo e-mail 4 vezes.
 **Junto:** `.gitattributes` com `eol=lf` -- o `git switch` no Windows (`core.autocrlf=true`) reescrevia a copia local em CRLF e quebrava 65 testes de encoding.
+
+---
+
+## D46 - Reserva por SMTP direto; dead-man's switch fora do host
+
+**Decisao:** o `Notifier` ganha um `fallback` opcional (`notify/smtp_fallback.py`, `smtplib` da stdlib). Ele so e chamado quando o webhook do n8n ESGOTA as tentativas com o n8n de pe; enviando, o item vira `sent` com `channel = smtp_direto` e o erro do webhook registrado. Falhando, segue `failed` retentavel (D37). Sem `mail.smtp` no YAML, nada muda.
+**O que NAO muda:** D8 (n8n fora -> log) e D45 (`ReadTimeout` = entrega presumida, sem reserva). Fila e despachante intactos; pior caso por item 195 s, abaixo dos 240 s do `TIMEOUT_ITEM_SEGUNDOS`.
+**Verificado em 21/10/2026:** `pop.`/`smtp.`/`mail.grupocampanha.com.br` respondem SMTP em 465 (SSL) e 587 (STARTTLS). Porta 465 exige `seguranca: ssl` -- com `starttls` o cliente espera banner em texto puro ate o timeout.
+**Dead-man's switch:** `scripts/deadman.sh` em cron Linux FORA do host do Docker. 200 = OK, 503 = DEGRADADO, resto = MORTO; avisa so na transicao confirmada por 2 leituras (10 min), por curl SMTP -- nao passa pelo n8n nem pelo agente.
+**Trade-off aceito:** timeout do SMTP depois do DATA, seguido de retry da fila, pode duplicar um e-mail (nao ha como saber se foi aceito).
+**Fora daqui, por decisao:** SMTP tambem com o n8n fora (altera o D8; decisao do dono).
+**Travado por:** `tests/unit/test_smtp_fallback.py`.

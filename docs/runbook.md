@@ -30,13 +30,25 @@ sonda (esta instância do n8n não expõe versão: `/healthz` devolve só o stat
 O Hermes alerta por log quando o n8n cai. Se **ninguém consome esse log**, o
 resultado é um monitor que falha em silêncio — o pior modo de falha possível.
 
-Instale em uma máquina **diferente** da que roda o Hermes:
+Instale `scripts/deadman.sh` (ADR D46) em uma máquina Linux **diferente** da que roda o Hermes.
+Ele lê o `/healthz` (200 = OK, 503 = DEGRADADO, resto = MORTO) e manda e-mail por SMTP direto
+só na **transição**, confirmada por 2 leituras seguidas (10 min):
 
 ```bash
-# crontab, a cada 5 minutos
-*/5 * * * * curl -fsS --max-time 10 http://IP_DO_HERMES:8099/healthz -o /dev/null \
-  || logger -t HERMES "HERMES-MORTO: sem heartbeat ha mais de 5min"
+sudo install -D -m 750 scripts/deadman.sh /opt/hermes/deadman.sh
+sudo install -m 600 /dev/null /etc/hermes-deadman.env   # preencha:
+# HERMES_HEALTH_URL=http://IP_DO_HERMES:8099/healthz
+# HERMES_ALERTA_PARA=destinatario@dominio
+# SMTP_URL=smtps://pop.grupocampanha.com.br:465
+# SMTP_FROM=nio@grupocampanha.com.br
+# SMTP_USERNAME=...
+# SMTP_PASSWORD=...
+crontab -e
+# */5 * * * * set -a; . /etc/hermes-deadman.env; set +a; /opt/hermes/deadman.sh
 ```
+
+Teste: aponte `HERMES_HEALTH_URL` para uma porta fechada e rode duas vezes. A 2ª execução
+envia "[HERMES] agente MORTO (http 000)". O estado fica em `/var/tmp/hermes-deadman.estado`.
 
 E um consumidor do alerta em stderr. No deploy atual (stack do Portainer) o
 stderr vai para o log do container `agent-nio-monitor`:

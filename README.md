@@ -15,7 +15,7 @@ o responsável certo.
 
 ## Status atual
 
-**1330 testes passando** (+3 do LLM, pulados com `SKIP_LLM_TESTS=1`), lint limpo, cobertura de **93%**.
+**1594 testes passando** (+3 do LLM, pulados com `SKIP_LLM_TESTS=1`), lint limpo, cobertura de **93%**.
 Suíte completa em ~18 s (sem cobertura). Nenhum arquivo de `src/` passa de 300 linhas.
 
 | Ticket | Entrega | Estado |
@@ -26,7 +26,7 @@ Suíte completa em ~18 s (sem cobertura). Nenhum arquivo de `src/` passa de 300 
 | T4 | LLM redige + templates de email | OK |
 | T5 | Diff estrutural de workflow | OK — job `workflows_full` |
 | T6 | Cliente Portainer | OK — jobs `containers_*` e `stacks` |
-| T7 | HealthServer + dead-man's switch | HealthServer OK; FALTA instalar o cron externo |
+| T7 | HealthServer + dead-man's switch | HealthServer OK; `scripts/deadman.sh` pronto (D46); FALTA instalar o cron no Linux |
 
 ### Bugs achados e corrigidos na auditoria
 
