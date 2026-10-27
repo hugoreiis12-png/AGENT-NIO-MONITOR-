@@ -16,7 +16,7 @@ projects:
   3imXOO5ZxENBY78E:
     - rafael.barboza@grupocampanha.com.br
   V3yqT1MGvf0Ufg17:
-    - carlos.henrique@grupocampanha.com.br
+    - carlos.oliveira@grupocampanha.com.br
   wGiMpmFFLBhiwtFm:
     - hugo.reis@grupocampanha.com.br
     - rafael.barboza@grupocampanha.com.br
@@ -35,12 +35,13 @@ projects:
 # ADR existiam, e nenhum emissor.
 global:
   - hugo.reis@grupocampanha.com.br
+  - carlos.oliveira@grupocampanha.com.br
 
 # Pessoa -> e-mail. Vale para usuario do Portainer (CreatedBy/UpdatedBy) e para o
 # autor de workflow no n8n (activeVersion.authors). Quem nao esta aqui NAO e
 # notificado (log: `pessoa_sem_email_mapeado`). `admin` do Portainer: sem e-mail definido.
 usuarios:
-  carlos: carlos.henrique@grupocampanha.com.br
+  carlos: carlos.oliveira@grupocampanha.com.br
   felipe: felipe.chaves@grupocampanha.com.br
   elton: elton.canto@grupocampanha.com.br
   hugo: hugo.reis@grupocampanha.com.br
@@ -52,7 +53,7 @@ usuarios:
 fontes:
   powerautomate:
     - rafael.barboza@grupocampanha.com.br
-    - carlos.henrique@grupocampanha.com.br
+    - carlos.oliveira@grupocampanha.com.br
 
 # Destinatario EXCLUSIVO por workflow (id): ignora projeto e autor.
 workflows:
