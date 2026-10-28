@@ -14,6 +14,7 @@ import structlog
 
 from .boot_probe import sondar_no_boot
 from .config.schema import AppConfig
+from .correlacao import Correlacionador
 from .deep_collection import DeepCollection
 from .health import HealthState
 from .llm.analyst import AlertAnalyst
@@ -21,7 +22,7 @@ from .llm.client import LlmClient
 from .notify.mailer import DispatchResult, Notifier
 from .notify.pipeline import EventPipeline
 from .notify.resolution import ResolutionChecker
-from .notify.people import exclusive_by_source, exclusive_by_workflow, fallback_de_emergencia, people_by_project, portainer_users
+from .notify.people import exclusive_by_source, exclusive_by_workflow, fallback_de_emergencia, people_by_project, portainer_users, sempre_incluir
 from .notify.resolver import RecipientResolver
 from .notify.sender import enviar_alerta
 from .notify.smtp_fallback import build_smtp_fallback
@@ -82,10 +83,15 @@ class Agent:
             exclusivos=exclusive_by_workflow(),
             por_fonte=exclusive_by_source(),
             global_fallback=fallback_de_emergencia(),
+            sempre_incluir=sempre_incluir(),
             max_recipients=self.policy.max_recipients,
         )
         self.n8n = self.resolver.client
         self.index = WorkflowIndex(self.n8n)
+        # Mapa de pontes (correlacoes): consultado pelo enriquecimento e pela
+        # ferramenta de investigacao. Uma instancia SÓ: os dois lados veem o
+        # mesmo mapa resolvido no boot.
+        self.correlacao = Correlacionador(self.n8n, self.cfg.policy.correlacoes)
         self.workflow_monitor = WorkflowMonitor(
             self.n8n, self.repo, refactor_max_score=self.policy.thresholds.refactor_max_score,
             quieto_minutos=self.policy.aggregation.edicao_quieta_minutos,
@@ -93,7 +99,7 @@ class Agent:
         self.containers, self.stacks, self.resources = build_portainer(cfg, self.repo) or (None, None, None)
         self.desktop = build_power_automate(cfg, self.repo)
         portainer = self.containers.client if self.containers is not None else None
-        self.deep = DeepCollection(cfg, self.repo, self.n8n, portainer, self.desktop, self.llm)
+        self.deep = DeepCollection(cfg, self.repo, self.n8n, portainer, self.desktop, self.llm, correlacao=self.correlacao)
         self.analyst.investigador = self.deep.investigador
         self.pipeline = EventPipeline(
             repo=self.repo, queue=queue if queue is not None else InMemoryQueue(), rules=self.rules,
@@ -282,7 +288,15 @@ class Agent:
             return 0
         await self.index.load()
         por_nome = {nome: wid for wid, nome in self.index.names.items()}
-        return await self._ciclo(await self.deep.logs.check_logs(por_nome), "portainer_logs")
+        resultado = await self.deep.logs.check_logs(por_nome)
+        # Correlacao de fontes (ADR do incidente MB): o log delata a dependencia,
+        # o n8n confirma ou refuta. Enriquece o evento E pode gerar
+        # `dependency_silent` -- ambos deterministigos, sem LLM no caminho.
+        if self.correlacao.habilitado and resultado.extra.get("eventos"):
+            extras = await self.correlacao.aplicar(resultado.extra["eventos"])
+            resultado.extra["eventos"] += extras
+            self.health.mark_n8n(self.n8n.alive)
+        return await self._ciclo(resultado, "portainer_logs")
 
     async def maintain_partitions(self) -> int:
         """Cria os meses a frente e aplica a retencao. Sem banco (InMemory) nao ha o que manter."""

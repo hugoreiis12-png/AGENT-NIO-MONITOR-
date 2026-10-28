@@ -196,6 +196,47 @@ class LogsConfig(BaseModel):
         return self
 
 
+class CorrelacaoWorkflow(BaseModel):
+    """Workflow do n8n do qual a automacao depende. Nome humano + id real:
+    o par e validado no boot (used pelo `Correlacionador`, que consulta execucoes por id)."""
+
+    name: str = Field(min_length=1)
+    id: str = Field(min_length=1, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class CorrelacaoConfig(BaseModel):
+    """Ponte declarada entre uma automacao externa e os workflows do n8n dela.
+
+    O caso que fechou a feature (28/10/2026): o pipeline mcd-donalds pagou a
+    espera de 270 s do reset_link e fracassou, o `MB Event Broker` respondia
+    VERDE (execucoes success) -- a quebra estava na dependencia indireta, e
+    nenhuma fonte isolada mostrava o nexo. Aqui se declara: nomes que casam a
+    automacao (regex, case-insensitive, sobre nome de container/pipeline),
+    marcadores de texto que delatam a espera e os workflows a consultar.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    automacao: list[str] = Field(min_length=1)
+    marcadores: list[str] = Field(min_length=1)
+    workflows: list[CorrelacaoWorkflow] = Field(min_length=1)
+    # ±minutos ao redor do momento do erro. NAO e cadencia esperada: o poller
+    # roda em rajadas, entao sanidade se deduz do que EXECUTOU na janela,
+    # nunca da frequencia.
+    janela_min: int = Field(default=15, ge=1, le=120)
+
+    @model_validator(mode="after")
+    def _regex_validas(self) -> CorrelacaoConfig:
+        import re
+
+        for padrao in (*self.automacao, *self.marcadores):
+            try:
+                re.compile(padrao, re.IGNORECASE)
+            except re.error:
+                raise ValueError(f"regex invalida: {padrao}") from None
+        return self
+
+
 class PolicyConfig(BaseModel):
     thresholds: ThresholdsConfig = ThresholdsConfig()
     logs: LogsConfig = LogsConfig()
@@ -203,6 +244,8 @@ class PolicyConfig(BaseModel):
     quiet_hours: QuietHoursConfig = QuietHoursConfig()
     rules: list[NotificationRule] = Field(min_length=1)
     max_recipients: int = Field(default=10, ge=1, le=50)
+    # vazia = feature de correlacao desligada (sem entradas, nada e consultado).
+    correlacoes: list[CorrelacaoConfig] = Field(default_factory=list)
 
 
 class AppConfig(BaseModel):

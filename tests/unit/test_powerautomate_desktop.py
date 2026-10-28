@@ -166,9 +166,12 @@ class TestEmail:
         enviado = agente.notifier.enviado
         linhas = [x.strip() for x in unescape(re.sub(r"<[^>]+>", "\n", enviado["html"])).splitlines() if x.strip()]
         assert enviado["subject"].startswith("[CRITICO] RPA RPA-CONTAS-A-RECEBER falhou 3x")
+        # `fontes: powerautomate` do people.yaml (rafael + carlos) + elton, que
+        # entra em copia em TODO disparo por `sempre_incluir` (fixture do dono).
         assert sorted(enviado["recipients"]) == [
-            "carlos.henrique@grupocampanha.com.br", "rafael.barboza@grupocampanha.com.br",
-        ], "alerta de RPA vai SO para `fontes: powerautomate` do people.yaml (decisao do dono)"
+            "carlos.oliveira@grupocampanha.com.br", "elton.canto@grupocampanha.com.br",
+            "rafael.barboza@grupocampanha.com.br",
+        ], "alerta de RPA vai para `fontes: powerautomate` + copia permanente do elton"
         assert linhas[linhas.index("Responsável pelo fluxo") + 1] == "Hugo Reis <hugo@jfcagro.com.br>"
         assert "NOTEAUTSAP" in linhas[linhas.index("Detalhe") + 1]
         assert "Abrir no n8n" not in linhas

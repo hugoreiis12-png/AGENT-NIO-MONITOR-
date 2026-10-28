@@ -42,6 +42,26 @@ thresholds:
   mem_pct: 90           # % do limite de memoria do container
   sustained_samples: 5   # coletas de 60 s: ~5 min acima do limite
 
+# Cruzamento de fontes (incidente MB de 28/10/2026): quando o log de container
+# delata uma DEPENDENCIA do n8n, o agente consulta as execucoes dos workflows
+# mapeados, anexa os fatos ao evento e, se a dependencia nao entregou, emite
+# `dependency_silent`. Janela por EVIDENCIA na janela, nunca por cadencia: o
+# poller roda em rajadas horarias, e frequencia baixa aqui e normal.
+correlacoes:
+  - # Pipeline de extracao do portal Martin Brower (roda na VM, log vai prox ao
+    # container do Portainer). Marcadores vao do proprio log do incidente.
+    automacao: ["mcd.?donalds", "mcdonalds"]
+    marcadores:
+      - "RESET_LINK_TIMEOUT"
+      - "Ponte n8n viva"
+      - "execuções do fluxo de trabalho"
+    workflows:
+      - name: "MB Email IMAP"
+        id: D5TsMY8mOJj6gJ1L
+      - name: "MB Event Broker"
+        id: STfrlbTnTeuBDntf
+    janela_min: 15
+
 rules:
   # Falha repetida de workflow e o sinal de maior valor: os horarios observados
   # sao deterministicos, ou seja, sao jobs agendados quebrados, nao incidentes.
@@ -148,6 +168,16 @@ rules:
     severity: critical
     notify: true
     template: "reconciliation_gap"
+
+  # Ponte quebrou SEM falha visivel: a automacao pagou a espera do seu timeout e
+  # a dependencia n8n nao entregou (nao rodou, errou ou respondeu vazio). Verdade
+  # encontrada pelo cruzamento de fontes -- n8n "verde" nunca mais esconde isso.
+  - name: "dependencia_muda"
+    event_types: ["dependency_silent"]
+    severity: high
+    notify: true
+    template: "dependency_silent"
+    re_notify_after_minutes: 720
 
   - name: "n8n_indisponivel"
     event_types: ["source_down"]

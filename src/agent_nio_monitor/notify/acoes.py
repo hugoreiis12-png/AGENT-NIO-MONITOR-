@@ -42,6 +42,11 @@ ACAO_PADRAO = {
         "(ex.: IMAP, webhook) e reativar o workflow se preciso."
     ),
     "container_log_error": "Ver o log completo do container no Portainer e o que mudou antes do erro aparecer.",
+    "dependency_silent": (
+        "A automacao esperou entrega da ponte do n8n e nao recebeu. Conferir as execucoes do workflow "
+        "mapeado na secao Correlacoes: se nao rodou, reativar/investigar o workflow; se rodou verde e "
+        "respondeu vazio, o problema esta no deposito anterior (IMAP/portal) ou no consumo."
+    ),
     "desktop_flow_handled_errors": (
         "Abrir a execucao no Power Automate e ver a acao indicada: o fluxo seguiu em frente, "
         "mas o resultado pode estar incompleto."

@@ -43,12 +43,14 @@ class RecipientResolver:
         exclusivos: dict[str, list[str]] | None = None,
         por_fonte: dict[str, list[str]] | None = None,
         global_fallback: list[str] | None = None,
+        sempre_incluir: list[str] | None = None,
         max_recipients: int = 10,
     ) -> None:
         self.client = n8n_client
         self.people = people or {}
         self.exclusivos = exclusivos or {}
         self.por_fonte = por_fonte or {}
+        self.sempre_incluir = [e for e in (sempre_incluir or []) if e]
         self.usuarios = {k.lower(): v for k, v in (usuarios or {}).items()}
         self.global_fallback = global_fallback or []
         self.max_recipients = max_recipients
@@ -116,7 +118,23 @@ class RecipientResolver:
     async def resolve_for_event(self, project_id: str | None, detail: dict[str, Any], *,
                                 fonte: str | None = None) -> Resolution:
         """Responsavel do projeto/stack + quem mexeu no recurso. Lista exclusiva em
-        `people.yaml` (`fontes:` por fonte, `workflows:` por id) ignora projeto e autor."""
+        `people.yaml` (`fontes:` por fonte, `workflows:` por id) ignora projeto e autor.
+
+        `sempre_incluir` e SOMADO ao resultado de QUALQUER caminho -- inclusive aos
+        exclusivos, que de outro modo ignoram todo o resto. Ele vem primeiro no dedup
+        de proposito: se a lista base estourar `max_recipients`, quem e cortado e a
+        base, nunca o endereco de copia permanente."""
+        base = await self._base(project_id, detail, fonte=fonte)
+        if not self.sempre_incluir:
+            return base
+        return Resolution(
+            emails=self._dedup([*self.sempre_incluir, *base.emails]),
+            source=base.source,
+            detail=base.detail,
+        )
+
+    async def _base(self, project_id: str | None, detail: dict[str, Any], *,
+                    fonte: str | None = None) -> Resolution:
         exclusivo_da_fonte = self.por_fonte.get(fonte or "")
         if exclusivo_da_fonte:
             return Resolution(emails=self._dedup(exclusivo_da_fonte), source="fonte_exclusiva")

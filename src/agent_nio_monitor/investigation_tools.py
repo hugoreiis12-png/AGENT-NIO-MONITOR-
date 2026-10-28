@@ -50,11 +50,16 @@ ESQUEMAS = {
     "acoes_da_sessao_rpa": _ferramenta(
         "acoes_da_sessao_rpa", "Acoes de uma sessao de RPA: quais falharam, em que subfluxo e com que erro.",
         {"sessao_id": _TEXTO}, ["sessao_id"]),
+    "correlacionar": _ferramenta(
+        "correlacionar", "Ponte declarada no mapa de correlacoes: como os workflows do n8n dos quais esta automacao"
+        " depende se portaram na janela do erro ( executou? verde? entregou?). Justo lembrar: verde no n8n"
+        " pode esconder entrega vazia -- este e o cruzamento que separa os casos.",
+        {"texto": _TEXTO}, ["texto"]),
 }
 POR_FONTE = {
-    "n8n": ("execucao_n8n", "ultimas_execucoes_n8n", "log_do_container"),
-    "portainer": ("log_do_container", "inspecionar_container"),
-    "powerautomate": ("sessoes_rpa", "acoes_da_sessao_rpa"),
+    "n8n": ("execucao_n8n", "ultimas_execucoes_n8n", "log_do_container", "correlacionar"),
+    "portainer": ("log_do_container", "inspecionar_container", "correlacionar"),
+    "powerautomate": ("sessoes_rpa", "acoes_da_sessao_rpa", "correlacionar"),
 }
 # Ferramenta -> cliente que ela exige (fonte desligada = ferramenta fora da lista).
 REQUER = {
@@ -71,15 +76,21 @@ def _saida(dados: Any) -> str:
 class InvestigationTools:
     def __init__(
         self, *, n8n: N8NClient, portainer: PortainerClient | None, dataverse: DataverseClient | None,
+        correlacao=None,  # noqa: ANN001 - Correlacionador; None = sem pontes declaradas
     ) -> None:
         self.n8n, self.portainer, self.dataverse = n8n, portainer, dataverse
+        self.correlacao = correlacao
 
     def esquemas(self, fonte: str) -> list[dict]:
         clientes = {"portainer": self.portainer, "powerautomate": self.dataverse}
-        return [
-            ESQUEMAS[nome] for nome in POR_FONTE.get(fonte, ())
-            if nome not in REQUER or clientes[REQUER[nome]] is not None
-        ]
+        saida: list[dict] = []
+        for nome in POR_FONTE.get(fonte, ()):
+            if nome in REQUER and clientes[REQUER[nome]] is None:
+                continue
+            if nome == "correlacionar" and not (self.correlacao and self.correlacao.habilitado):
+                continue
+            saida.append(ESQUEMAS[nome])
+        return saida
 
     async def executar(self, nome: str, argumentos: str | dict) -> str:
         funcao: Callable[..., Awaitable[Any]] | None = getattr(self, f"_{nome}", None) if nome in ESQUEMAS else None
@@ -105,6 +116,15 @@ class InvestigationTools:
     async def _ultimas_execucoes_n8n(self, workflow_id: str, quantidade: int = 10) -> list[dict]:
         execucoes = await self.n8n.recent_executions(workflow_id, max(1, min(int(quantidade), 25)))
         return [{k: e.get(k) for k in ("id", "status", "startedAt", "stoppedAt", "mode")} for e in execucoes]
+
+    async def _correlacionar(self, texto: str) -> list[dict]:
+        """Fatos das pontes declaradas que casem o texto do erro (janela do mapa)."""
+        if not (self.correlacao and self.correlacao.habilitado):
+            return [{"leitura": "sem_mapa", "nota": "nenhuma correlacao declarada em policy.yaml"}]
+        entrada = self.correlacao.casar("", texto)
+        if entrada is None:
+            return []
+        return await self.correlacao.apurar(entrada)
 
     async def _achar_container(self, nome: str) -> tuple[int, dict]:
         for endpoint in await self.portainer.list_endpoints():

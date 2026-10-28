@@ -57,7 +57,7 @@ class TestWorkflowExclusivo:
 class TestPoliticaDoPeopleYaml:
     """Regras combinadas com o dono: Rafael sai de 3 fluxos e entra onde e dono/autor."""
 
-    def _resolver(self) -> RecipientResolver:
+    def _resolver(self, **kw) -> RecipientResolver:
         from agent_nio_monitor.notify.people import (
             exclusive_by_workflow,
             people_by_project,
@@ -65,13 +65,16 @@ class TestPoliticaDoPeopleYaml:
         )
 
         return RecipientResolver(None, people_by_project(), usuarios=portainer_users(),
-                                 exclusivos=exclusive_by_workflow())
+                                 exclusivos=exclusive_by_workflow(), **kw)
 
-    async def test_tres_fluxos_vao_so_para_o_hugo(self) -> None:
+    async def test_tres_fluxos_notificam_o_hugo_e_o_elton(self) -> None:
+        """O exclusivo de cada um dos 3 fluxos e [hugo, elton]: o dono recebe e
+        o elton entra em copia (fixture do dono, hoje explicito na propria lista)."""
+        esperado = ["hugo.reis@grupocampanha.com.br", "elton.canto@grupocampanha.com.br"]
         for wid in ("nATlDqPBknIcPaW3", "STfrlbTnTeuBDntf", "jCWyCWHK1XMhckeF"):
             r = await self._resolver().resolve_for_event(
                 "wGiMpmFFLBhiwtFm", {"workflow_id": wid, "autor": "Rafael Barboza"})
-            assert r.emails == ["hugo.reis@grupocampanha.com.br"], wid
+            assert r.emails == esperado, wid
 
     async def test_workflow_do_rafael_notifica_dono_do_projeto_e_o_autor(self) -> None:
         r = await self._resolver().resolve_for_event(
@@ -79,10 +82,74 @@ class TestPoliticaDoPeopleYaml:
         assert "rafael.barboza@grupocampanha.com.br" in r.emails
 
     async def test_stack_do_portainer_notifica_dono_e_ultimo_autor(self) -> None:
+        """Caminho de autoria puro: o helper nao passa `global_fallback`, entao
+        saem so o usuario do Portainer que e dono/ultimo autor. `carlos` no
+        `usuarios:` e carlos.oliveira (yaml atual)."""
         r = await self._resolver().resolve_for_event(
             None, {"autor": "felipe", "responsavel_stack": "carlos"})
-        assert sorted(r.emails) == ["carlos.henrique@grupocampanha.com.br",
-                                    "felipe.chaves@grupocampanha.com.br"]
+        assert r.source == "autoria"
+        assert r.emails == ["felipe.chaves@grupocampanha.com.br",
+                            "carlos.oliveira@grupocampanha.com.br"]
+
+
+class TestSempreIncluir:
+    """`people.yaml: sempre_incluir` -- e-mail de copia em TODO disparo.
+
+    Diferente de `fontes:`/`workflows:` (exclusivos: cortam os outros), esta lista
+    e somada ao resultado final, em qualquer caminho de resolucao. Foi o fixture
+    pedido: elton.canto entra em copia em workflows, stacks/containers e RPA,
+    sem tirar destinatario de ninguem.
+    """
+
+    ELTON = "elton.canto@grupocampanha.com.br"
+
+    async def test_soma_ao_dono_do_projeto(self) -> None:
+        res = await RecipientResolver(None, {"P1": ["dono@x.com"]},
+                                      sempre_incluir=[self.ELTON]).resolve_for_event("P1", {})
+        assert res.emails == [self.ELTON, "dono@x.com"], "copia entra e o dono fica"
+
+    async def test_nao_duplica_quando_a_base_ja_o_tem(self) -> None:
+        res = await RecipientResolver(None, {"P1": [self.ELTON, "dono@x.com"]},
+                                      sempre_incluir=[self.ELTON]).resolve_for_event("P1", {})
+        assert res.emails == [self.ELTON, "dono@x.com"]
+
+    async def test_soma_caminho_de_autoria(self) -> None:
+        res = await RecipientResolver(None, {"P1": ["dono@x.com"]},
+                                      sempre_incluir=[self.ELTON]).resolve_for_event(
+            "P1", {"autor": "Ana <ana@x.com>"})
+        assert res.emails == [self.ELTON, "dono@x.com", "ana@x.com"]
+
+    async def test_soma_ao_exclusivo_de_workflow(self) -> None:
+        res = await RecipientResolver(None, {"P1": ["dono@x.com"]},
+                                      exclusivos={"wf1": ["hugo@x.com"]},
+                                      sempre_incluir=[self.ELTON]).resolve_for_event(
+            "P1", {"workflow_id": "wf1"})
+        assert res.source == "workflow_exclusivo"
+        assert res.emails == [self.ELTON, "hugo@x.com"], "o exclusivo perde o poder de cortar a copia"
+
+    async def test_soma_a_fonte_exclusiva(self) -> None:
+        res = await RecipientResolver(
+            None, {"P1": ["dono@x.com"]},
+            por_fonte={"powerautomate": ["rafael@x.com", "carlos@x.com"]},
+            sempre_incluir=[self.ELTON],
+        ).resolve_for_event("P1", {}, fonte="powerautomate")
+        assert res.source == "fonte_exclusiva"
+        assert res.emails == [self.ELTON, "rafael@x.com", "carlos@x.com"]
+
+    async def test_soma_ao_fallback_global(self) -> None:
+        res = await RecipientResolver(None, {}, global_fallback=["plantao@x.com"],
+                                      sempre_incluir=[self.ELTON]).resolve_for_event(None, {})
+        assert res.emails == [self.ELTON, "plantao@x.com"]
+
+    async def test_o_teto_corta_a_base_e_nunca_a_copia(self) -> None:
+        base = [f"p{i}@x.com" for i in range(3)]
+        res = await RecipientResolver(None, {"P1": base}, sempre_incluir=[self.ELTON],
+                                      max_recipients=2).resolve_for_event("P1", {})
+        assert res.emails == [self.ELTON, "p0@x.com"]
+
+    async def test_sem_a_chave_o_comportamento_e_o_de_hoje(self) -> None:
+        res = await RecipientResolver(None, {"P1": ["dono@x.com"]}).resolve_for_event("P1", {})
+        assert res.emails == ["dono@x.com"], "lista vazia nunca altera a resolucao"
 
 
 class TestFallbackGlobal:
@@ -118,6 +185,75 @@ class TestFallbackGlobal:
 
         invalidos = [e for e in global_fallback() if "@" not in e or e.startswith("@")]
         assert not invalidos, f"endereco invalido no fallback global: {invalidos}"
+
+
+class TestPoliticaSempreIncluir:
+    """Fixture pedido pelo dono: elton.canto entra em copia em TODO disparo
+    (workflows, stacks/containers e powerautomate), sem tirar destinatario
+    de ninguem. Vale por `people.yaml: sempre_incluir`, ligado no boot pelo
+    `Agent` (`sempre_incluir=sempre_incluir()`)."""
+
+    ELTON = "elton.canto@grupocampanha.com.br"
+
+    def test_a_chave_existe_e_contem_o_elton(self) -> None:
+        from agent_nio_monitor.notify.people import sempre_incluir
+
+        sempre = sempre_incluir()
+        assert sempre == [self.ELTON], f"sempre_incluir inesperado: {sempre}"
+
+    async def test_os_tres_fluxos_exclusivos_notificam_hugo_e_o_elton(self) -> None:
+        from agent_nio_monitor.notify.people import (
+            exclusive_by_workflow,
+            people_by_project,
+            portainer_users,
+            sempre_incluir,
+        )
+
+        for wid in ("nATlDqPBknIcPaW3", "STfrlbTnTeuBDntf", "jCWyCWHK1XMhckeF"):
+            r = await RecipientResolver(
+                None,
+                people_by_project(),
+                usuarios=portainer_users(),
+                exclusivos=exclusive_by_workflow(),
+                sempre_incluir=sempre_incluir(),
+            ).resolve_for_event("wGiMpmFFLBhiwtFm", {"workflow_id": wid})
+            assert r.emails == [self.ELTON, "hugo.reis@grupocampanha.com.br"], wid
+
+    async def test_fonte_powerautomate_notifica_o_elton_e_os_demais_da_lista(self) -> None:
+        from agent_nio_monitor.notify.people import (
+            exclusive_by_source,
+            people_by_project,
+            sempre_incluir,
+        )
+
+        r = await RecipientResolver(
+            None,
+            people_by_project(),
+            por_fonte=exclusive_by_source(),
+            sempre_incluir=sempre_incluir(),
+        ).resolve_for_event(None, {}, fonte="powerautomate")
+        assert r.source == "fonte_exclusiva"
+        assert r.emails[0] == self.ELTON
+        assert "rafael.barboza@grupocampanha.com.br" in r.emails
+        assert "carlos.oliveira@grupocampanha.com.br" in r.emails
+
+    async def test_stack_do_portainer_notifica_dono_autor_e_o_elton(self) -> None:
+        from agent_nio_monitor.notify.people import (
+            people_by_project,
+            portainer_users,
+            sempre_incluir,
+        )
+
+        r = await RecipientResolver(
+            None,
+            people_by_project(),
+            usuarios=portainer_users(),
+            sempre_incluir=sempre_incluir(),
+        ).resolve_for_event(None, {"autor": "felipe", "responsavel_stack": "carlos"})
+        assert r.emails[0] == self.ELTON
+        assert r.emails.count(self.ELTON) == 1, "copia nao duplica, nem quando o global ja o tem"
+        assert "felipe.chaves@grupocampanha.com.br" in r.emails
+        assert any(e.startswith("carlos.") for e in r.emails)
 
     async def test_o_fallback_nao_vaza_quando_o_projeto_resolve(self) -> None:
         """O fallback e o MESMO time que e dono dos projetos -- de proposito.

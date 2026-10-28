@@ -25,12 +25,15 @@ class DeepCollection:
     def __init__(
         self, cfg: AppConfig, repo: Repository, n8n: N8NClient,
         portainer: PortainerClient | None, desktop: DesktopFlowCollector | None, llm: LlmClient,
+        correlacao=None,  # noqa: ANN001 - Correlacionador (None quando policy tem nenhuma ponte)
     ) -> None:
         self.caminhos = ExecutionPathCollector(n8n, repo)
         self.logs = ContainerLogCollector(portainer, repo, cfg.policy.logs) if portainer else None
         self.acoes = LeitorDeAcoes(desktop.client) if desktop else None
         self.fluxos = DesktopFlowCatalog(desktop.client, repo) if desktop else None
-        ferramentas = InvestigationTools(n8n=n8n, portainer=portainer, dataverse=desktop.client if desktop else None)
+        ferramentas = InvestigationTools(
+            n8n=n8n, portainer=portainer, dataverse=desktop.client if desktop else None, correlacao=correlacao,
+        )
         self.investigador = Investigator(
             llm, ferramentas, max_passos=cfg.llm.investigacao_max_passos, prazo=cfg.llm.investigacao_prazo_segundos,
         ) if cfg.llm.investigacao else None

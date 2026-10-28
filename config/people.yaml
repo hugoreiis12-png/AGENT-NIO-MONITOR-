@@ -36,6 +36,7 @@ projects:
 global:
   - hugo.reis@grupocampanha.com.br
   - carlos.oliveira@grupocampanha.com.br
+  - elton.canto@grupocampanha.com.br
 
 # Pessoa -> e-mail. Vale para usuario do Portainer (CreatedBy/UpdatedBy) e para o
 # autor de workflow no n8n (activeVersion.authors). Quem nao esta aqui NAO e
@@ -47,6 +48,13 @@ usuarios:
   hugo: hugo.reis@grupocampanha.com.br
   rafael barboza: rafael.barboza@grupocampanha.com.br
 
+# E-mail que entra em TODA resolucao de destinatarios, sem substituir ninguem:
+# e SOMADO ao resultado final (project, autoria, workflow exclusivo, fonte
+# exclusiva ou global), nunca no lugar dele. O resolver aplica antes da lista
+# base, entao o teto `max_recipients` nunca corta quem esta aqui.
+sempre_incluir:
+  - elton.canto@grupocampanha.com.br
+
 # Destinatario EXCLUSIVO por fonte: todo alerta da fonte vai SO para esta lista
 # (ignora dono, projeto e `global`). O dono dos fluxos de RPA e a conta tecnica
 # NaturalFarms@rpanf.onmicrosoft.com, que ninguem le.
@@ -54,9 +62,10 @@ fontes:
   powerautomate:
     - rafael.barboza@grupocampanha.com.br
     - carlos.oliveira@grupocampanha.com.br
+    - elton.canto@grupocampanha.com.br
 
 # Destinatario EXCLUSIVO por workflow (id): ignora projeto e autor.
 workflows:
-  nATlDqPBknIcPaW3: [hugo.reis@grupocampanha.com.br]   # SITE GR API.V2
-  STfrlbTnTeuBDntf: [hugo.reis@grupocampanha.com.br]   # MB Event Broker
-  jCWyCWHK1XMhckeF: [hugo.reis@grupocampanha.com.br]   # FLUXO LOGISTICA COMPROVE
+  nATlDqPBknIcPaW3: [hugo.reis@grupocampanha.com.br, elton.canto@grupocampanha.com.br]   # SITE GR API.V2
+  STfrlbTnTeuBDntf: [hugo.reis@grupocampanha.com.br, elton.canto@grupocampanha.com.br]   # MB Event Broker
+  jCWyCWHK1XMhckeF: [hugo.reis@grupocampanha.com.br, elton.canto@grupocampanha.com.br]   # FLUXO LOGISTICA COMPROVE

@@ -87,15 +87,17 @@ async def test_alerta_sem_destinatario_e_registrado_como_falha(
 ) -> None:
     """O caminho de zero destinatario continua existindo -- e precisa de teste.
 
-    Ele e alcançavel se `people.yaml: global` for esvaziado de novo (o que a
-    integridade do e-mail nao pega). Aqui o fallback e forcado vazio para
-    exercitar o caminho, sem depender do conteudo do YAML de teste.
+    Ele e alcancavel se `people.yaml: global` E `people.yaml: sempre_incluir`
+    forem esvaziados (dois degraus independentes; cada um cobre o outro). Aqui
+    os dois sao forcados vazios para exercitar o caminho, sem depender do
+    conteudo do YAML de teste.
     """
     monkeypatch.setenv("N8N_API_KEY", "k")
     repo = InMemoryRepository()
     agent = Agent(load(), repo)
     agent.analyst = _AnalistaFixo()
     agent.resolver.global_fallback = []
+    agent.resolver.sempre_incluir = []
     try:
         resultado = await agent.dispatch(_evento_de_execucao())
 
@@ -116,6 +118,7 @@ async def test_alerta_perdido_e_visivel_no_health(monkeypatch: pytest.MonkeyPatc
     agent = Agent(load(), InMemoryRepository())
     agent.analyst = _AnalistaFixo()
     agent.resolver.global_fallback = []
+    agent.resolver.sempre_incluir = []
     try:
         assert agent.health.alertas_sem_destinatario == 0
         await agent.dispatch(_evento_de_execucao())

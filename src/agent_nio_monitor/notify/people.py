@@ -36,6 +36,17 @@ def exclusive_by_source() -> dict[str, list[str]]:
     return _load().get("fontes") or {}
 
 
+def sempre_incluir() -> list[str]:
+    """E-mails que entram em TODA resolucao de destinatarios, sem substituir ninguem.
+
+    Diferente de `fontes:` e `workflows:` (que sao EXCLUSIVOS: cortam os outros),
+    esta lista e SOMADA ao resultado final -- project, autoria, exclusivo ou global.
+    O `RecipientResolver` a coloca ANTES da lista base no dedup, entao o teto
+    `max_recipients` nunca corta quem esta aqui.
+    """
+    return _load().get("sempre_incluir") or []
+
+
 def global_fallback() -> list[str]:
     """Enderecos de seguranca para quando ninguem e resolvido.
 

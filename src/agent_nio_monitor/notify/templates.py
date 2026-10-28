@@ -46,6 +46,7 @@ SUBJECT = {
     "node_not_executed": "[{sev}] {nome}: etapa do fluxo nao rodou",
     "workflow_trigger_failed": "[{sev}] Gatilho de {nome} falhando",
     "container_log_error": "[{sev}] Erro no log de {nome}",
+    "dependency_silent": "[{sev}] Dependencia muda: {nome}",
     "desktop_flow_handled_errors": "[{sev}] RPA {nome} terminou com erros tratados",
     "workflow_refactored": "[{sev}] {nome} foi reorganizado (sem impacto no fluxo)",
     "container_created": "[{sev}] Container criado: {nome}",

@@ -23,7 +23,7 @@ SRC = RAIZ / "src" / "agent_nio_monitor"
 
 # Onde um `event_type` pode ser EMITIDO. `notify/` renderiza, `store/` persiste e
 # remonta -- nenhum dos dois decide que algo aconteceu.
-CAMADAS_EMISSORAS = (SRC / "sources", SRC / "agent.py")
+CAMADAS_EMISSORAS = (SRC / "sources", SRC / "agent.py", SRC / "correlacao.py")
 
 VOCABULARIO = re.compile(r"^[a-z][a-z0-9_]*_[a-z0-9_]+$")
 
@@ -96,6 +96,7 @@ def _emissores() -> set[str]:
     """
     arquivos = [p for p in CAMADAS_EMISSORAS[0].rglob("*.py") if "__pycache__" not in p.parts]
     arquivos.append(CAMADAS_EMISSORAS[1])
+    arquivos.append(CAMADAS_EMISSORAS[2])
 
     emissores: set[str] = set()
     for caminho in arquivos:
@@ -198,6 +199,7 @@ class TestPolicyReal:
             "node_error_hidden", "node_not_executed", "workflow_trigger_failed",
             "container_log_error", "desktop_flow_handled_errors",
             "workflow_refactored", "container_created", "desktop_flow_created",
+            "dependency_silent",
         }
         assert _emissores() == esperados, (
             "a lista de emissores derivados mudou de forma inesperada. "
