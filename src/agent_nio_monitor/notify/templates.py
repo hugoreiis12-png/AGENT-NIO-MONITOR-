@@ -25,6 +25,9 @@ SEV_LABEL = {
     "info": "INFO",
 }
 
+# Marca no inicio do assunto: identifica que o envio partiu do Agent NIO.
+MARCA_NIO = "◆"
+
 SUBJECT = {
     "workflow_failing": "[{sev}] {nome} falhou {n}x em {min}min",
     "execution_failed": "[{sev}] {nome} falhou",
@@ -185,7 +188,7 @@ def _assunto(template: str, event, d: dict) -> str:
             nome=d.get("workflow_nome") or "-",
             n=event.streak_count,
         )
-    return texto
+    return f"{MARCA_NIO} {texto}"
 
 
 def render(

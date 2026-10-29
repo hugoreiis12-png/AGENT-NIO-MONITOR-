@@ -252,6 +252,6 @@ class TestTemplate:
             event=evento,
             contexto={"detalhe": evento.detail["detalhe"], "fonte": "n8n"},
         )
-        assert assunto.startswith("[ALTO] Dependencia muda: mcd-donalds")
+        assert assunto.startswith("◆ [ALTO] Dependencia muda: mcd-donalds")
         assert "NAO executou" in corpo  # detalhe no corpo
         assert "reativar" in corpo  # acao_padrao referencia reativar

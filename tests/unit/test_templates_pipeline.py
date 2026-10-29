@@ -103,6 +103,10 @@ class TestTemplateExecucao:
         assert "?" not in assunto
         assert "1440min" in assunto
 
+    def test_assunto_comeca_com_a_marca_do_agent_nio(self) -> None:
+        assunto, _ = templates.render("workflow_failing", event=_evento(), contexto=CONtexto_REAL)
+        assert assunto.startswith(f"{templates.MARCA_NIO} [")
+
     def test_assunto_sem_janela_conhecida_omite_o_sufixo(self) -> None:
         assunto, _ = templates.render(
             "workflow_failing", event=_evento(),

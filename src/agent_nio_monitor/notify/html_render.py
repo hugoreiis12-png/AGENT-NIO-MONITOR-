@@ -23,6 +23,7 @@ PREHEADER_MAX = 110
 SEM_DETALHE = ("stack", "autor", "logs")
 
 
+
 @dataclass(frozen=True)
 class Tema:
     arquivo: str
