@@ -31,10 +31,25 @@ class PowerAutomateConfig(BaseModel):
     timeout_seconds: float = Field(default=30.0, gt=0, le=300)
 
 
+class BubbleConfig(BaseModel):
+    """App Bubble (comprover): Data API + health de workflows expostos.
+
+    Token por env var (BUBBLE_API_TOKEN); os 9 error types sao configuraveis.
+    """
+
+    api_root: str = Field(min_length=1, pattern=r"^https://")
+    token_env: str = "BUBBLE_API_TOKEN"
+    verify_ssl: bool = True
+    timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    error_types: list[str] = Field(default_factory=list)
+    workflow_check: bool = True
+
+
 class EnvironmentConfig(BaseModel):
     n8n: SourceConfig
     portainer: SourceConfig | None = None
     powerautomate: PowerAutomateConfig | None = None
+    bubble: BubbleConfig | None = None
 
 
 class PollingConfig(BaseModel):
@@ -50,6 +65,7 @@ class PollingConfig(BaseModel):
     container_state_seconds: float = Field(default=30.0, ge=25.0, le=60.0)
     container_stats_seconds: float = Field(default=60.0, ge=25.0, le=60.0)
     stack_changes_seconds: float = Field(default=60.0, ge=25.0, le=60.0)
+    bubble_poll_seconds: float = Field(default=30.0, ge=25.0, le=60.0)
     queue_seconds: float = Field(default=10.0, ge=5.0, le=25.0)
     queue_max_delay_seconds: float = Field(default=50.0, ge=30.0, le=120.0)
 

@@ -199,6 +199,7 @@ class TestPolicyReal:
             "node_error_hidden", "node_not_executed", "workflow_trigger_failed",
             "container_log_error", "desktop_flow_handled_errors",
             "workflow_refactored", "container_created", "desktop_flow_created",
+            "bubble_error_new", "bubble_workflow_5xx", "bubble_schema_changed", "bubble_api_unreachable",
             "dependency_silent",
         }
         assert _emissores() == esperados, (

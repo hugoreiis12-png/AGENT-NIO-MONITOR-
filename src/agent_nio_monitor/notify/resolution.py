@@ -42,6 +42,8 @@ def espera_em_segundos(event_type: str, polling: PollingConfig) -> float:
         "container_resource_high": polling.container_stats_seconds,
         "workflow_activated": polling.workflow_full_seconds,
         "workflow_deactivated": polling.workflow_full_seconds,
+        "bubble_workflow_5xx": polling.bubble_poll_seconds,
+        "bubble_api_unreachable": polling.bubble_poll_seconds,
     }.get(event_type)
     if not ciclo:
         return 0.0

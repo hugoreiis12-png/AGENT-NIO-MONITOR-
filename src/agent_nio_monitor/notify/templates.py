@@ -26,7 +26,16 @@ SEV_LABEL = {
 }
 
 # Marca no inicio do assunto: identifica que o envio partiu do Agent NIO.
+# Fallback para fonte desconhecida.
 MARCA_NIO = "◆"
+
+# Marca por fonte (stack): identifica de onde veio o alerta antes do texto.
+MARCA_POR_FONTE = {
+    "n8n": "★",
+    "portainer": "♛",
+    "powerautomate": "✦",
+    "bubble": "✧",
+}
 
 SUBJECT = {
     "workflow_failing": "[{sev}] {nome} falhou {n}x em {min}min",
@@ -188,7 +197,7 @@ def _assunto(template: str, event, d: dict) -> str:
             nome=d.get("workflow_nome") or "-",
             n=event.streak_count,
         )
-    return f"{MARCA_NIO} {texto}"
+    return f"{MARCA_POR_FONTE.get(event.source, MARCA_NIO)} {texto}"
 
 
 def render(

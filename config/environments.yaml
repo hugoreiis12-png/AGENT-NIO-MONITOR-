@@ -20,6 +20,25 @@ environments:
     # "URL do ambiente" do Power Platform admin center (credencial em POWERAUTOMATE_* no .env).
     powerautomate:
       dataverse_url: "https://org7dd46aa7.crm2.dynamics.com"
+    # App Bubble (comprover): error types + health de workflows + schema diff.
+    # Token em BUBBLE_API_TOKEN. Data API e /meta sao publicos (sem auth).
+    bubble:
+      api_root: "https://comprover.bubbleapps.io/api/1.1"
+      token_env: "BUBBLE_API_TOKEN"
+      verify_ssl: true
+      timeout_seconds: 30
+      workflow_check: true
+      # Error types monitorados (novo registro = evento warning)
+      error_types:
+        - errodecadastro
+        - errodecadastroprodutores
+        - errodelançamentodepedido
+        - errodeseparação
+        - erronota
+        - erro_roteirização
+        - erro_telefone
+        - falhadeseparação
+        - log_de_regsitro
 
 active_environment: production
 
@@ -34,6 +53,7 @@ polling:
   container_state_seconds: 30
   container_stats_seconds: 60
   stack_changes_seconds: 60
+  bubble_poll_seconds: 30        # app Bubble: error types + workflow health + schema diff
   queue_seconds: 10              # fila de disparo: reconfere e envia (nao le as fontes)
   queue_max_delay_seconds: 50    # alerta sai em ate 50 s depois de entrar na fila
 

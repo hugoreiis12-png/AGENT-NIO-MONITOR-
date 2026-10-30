@@ -19,7 +19,7 @@ from agent_nio_monitor.capabilities import Capability, CapabilityReport
 from agent_nio_monitor.config.loader import ConfigError
 
 INTERVALO_CURTO = 0.01
-JOBS_DA_AGENDA = 11
+JOBS_DA_AGENDA = 12
 
 
 class _AgenteFalso:
@@ -28,7 +28,8 @@ class _AgenteFalso:
     def __init__(self, stop: asyncio.Event, chamadas_ate_parar: int = 2) -> None:
         intervalos = dict.fromkeys(
             ["execution_errors_seconds", "workflow_full_seconds", "container_state_seconds",
-             "stack_changes_seconds", "container_stats_seconds", "queue_seconds"],
+             "stack_changes_seconds", "container_stats_seconds", "bubble_poll_seconds",
+             "queue_seconds"],
             INTERVALO_CURTO,
         )
         self.cfg = SimpleNamespace(polling=SimpleNamespace(**intervalos))
@@ -71,6 +72,9 @@ class _AgenteFalso:
 
     async def check_container_logs(self) -> int:
         return await self._conta("check_container_logs")
+
+    async def check_bubble(self) -> int:
+        return await self._conta("check_bubble")
 
     async def maintain_partitions(self) -> int:
         return await self._conta("maintain_partitions")

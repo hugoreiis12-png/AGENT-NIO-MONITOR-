@@ -104,7 +104,30 @@ class TestTemplateExecucao:
         assert "1440min" in assunto
 
     def test_assunto_comeca_com_a_marca_do_agent_nio(self) -> None:
+        """O evento de teste tem source='n8n'; a marca esperada e a do n8n,
+        nao mais a marca fixa do Agent NIO."""
         assunto, _ = templates.render("workflow_failing", event=_evento(), contexto=CONtexto_REAL)
+        assert assunto.startswith(f"{templates.MARCA_POR_FONTE['n8n']} [")
+
+    @pytest.mark.parametrize(
+        ("fonte", "marca"),
+        [
+            ("n8n", "★"),
+            ("portainer", "♛"),
+            ("powerautomate", "✦"),
+            ("bubble", "✧"),
+        ],
+    )
+    def test_marca_por_fonte(self, fonte: str, marca: str) -> None:
+        assunto, _ = templates.render(
+            "workflow_failing", event=_evento(source=fonte), contexto=CONtexto_REAL
+        )
+        assert assunto.startswith(f"{marca} [")
+
+    def test_marca_fallback_para_fonte_desconhecida(self) -> None:
+        assunto, _ = templates.render(
+            "workflow_failing", event=_evento(source="mystack"), contexto=CONtexto_REAL
+        )
         assert assunto.startswith(f"{templates.MARCA_NIO} [")
 
     def test_assunto_sem_janela_conhecida_omite_o_sufixo(self) -> None:

@@ -252,6 +252,35 @@ rules:
     notify: true
     template: "desktop_flow_created"
 
+  # --- App Bubble (comprover) -------------------------------------------------------
+  - name: "bubble_erro_novo"
+    event_types: ["bubble_error_new"]
+    severity: medium
+    notify: true
+    template: "generic"
+    re_notify_after_minutes: 720
+
+  - name: "bubble_workflow_5xx"
+    event_types: ["bubble_workflow_5xx"]
+    severity: high
+    notify: true
+    template: "generic"
+    re_notify_after_minutes: 60
+
+  - name: "bubble_schema_mudou"
+    event_types: ["bubble_schema_changed"]
+    severity: low
+    notify: true
+    template: "generic"
+    re_notify_after_minutes: 720
+
+  - name: "bubble_api_indisponivel"
+    event_types: ["bubble_api_unreachable"]
+    severity: high
+    notify: true
+    template: "generic"
+    re_notify_after_minutes: 10
+
 # Leitura dos logs dos containers (ADR D40). A primeira leitura de cada container
 # so aprende as mensagens que ja existem; alerta e para mensagem NOVA ou pico.
 logs:

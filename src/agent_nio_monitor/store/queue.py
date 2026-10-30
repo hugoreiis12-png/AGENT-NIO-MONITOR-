@@ -42,7 +42,7 @@ EVENTOS_DE_ESTADO = frozenset({
     "execution_failed", "container_stopped", "container_unhealthy", "container_removed",
     "container_restart_loop", "container_resource_high", "reconciliation_gap", "desktop_flow_failed",
     "node_not_executed", "node_error_hidden", "workflow_trigger_failed", "container_log_error",
-    "desktop_flow_handled_errors",
+    "desktop_flow_handled_errors", "bubble_workflow_5xx", "bubble_api_unreachable",
 })
 
 

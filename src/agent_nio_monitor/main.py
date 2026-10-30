@@ -178,6 +178,7 @@ async def _agenda(agent: Agent, stop: asyncio.Event) -> None:
         "power_automate": (p.execution_errors_seconds, agent.check_power_automate),
         "execution_paths": (p.execution_errors_seconds, agent.check_execution_paths),
         "container_logs": (p.container_state_seconds, agent.check_container_logs),
+        "bubble": (p.bubble_poll_seconds, agent.check_bubble),
         "fila": (p.queue_seconds, agent.flush_queue),
         "particoes": (MANUTENCAO_SEGUNDOS, agent.maintain_partitions),
     }

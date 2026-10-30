@@ -8,6 +8,7 @@ externo consulta e o unico sinal que sobrevive a um boot quebrado.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import structlog
@@ -30,6 +31,7 @@ from .rules.engine import RuleEngine
 from .sources.n8n.collector import ExecutionErrorCollector
 from .sources.n8n.credentials import CredentialCollector
 from .sources.n8n.events import evento_de_buraco, evento_de_falha, evento_de_queda
+from .sources.bubble.collector import BubbleCollector
 from .sources.n8n.suite import build_n8n
 from .sources.n8n.workflow_index import WorkflowIndex
 from .sources.n8n.workflow_monitor import WorkflowMonitor
@@ -98,6 +100,7 @@ class Agent:
         )
         self.containers, self.stacks, self.resources = build_portainer(cfg, self.repo) or (None, None, None)
         self.desktop = build_power_automate(cfg, self.repo)
+        self.bubble = self._build_bubble(cfg, self.repo)
         portainer = self.containers.client if self.containers is not None else None
         self.deep = DeepCollection(cfg, self.repo, self.n8n, portainer, self.desktop, self.llm, correlacao=self.correlacao)
         self.analyst.investigador = self.deep.investigador
@@ -109,6 +112,47 @@ class Agent:
                 limites=cfg.policy.thresholds, desktop=self.desktop, deep=self.deep,
             ),
         )
+
+    def _build_bubble(self, cfg: AppConfig, repo: Repository) -> BubbleCollector | None:
+        env = cfg.active.bubble
+        if env is None:
+            return None
+        token = os.environ.get(env.token_env, "")
+        if not token:
+            log.warning("bubble_sem_credencial_ciclo_desligado")
+            return None
+        from .sources.bubble import BubbleClient, BubbleCollector
+
+        client = BubbleClient(
+            api_root=env.api_root,
+            token=token,
+            timeout=env.timeout_seconds,
+            verify_ssl=env.verify_ssl,
+        )
+        return BubbleCollector(
+            client, repo,
+            error_types=tuple(env.error_types) if env.error_types else (),
+            workflow_check=env.workflow_check,
+        )
+
+    async def check_bubble(self) -> dict[str, Any]:
+        """Ciclo do app Bubble: error types + workflow health + schema diff."""
+        if self.bubble is None:
+            return {"fontes": 0, "eventos": 0}
+        inicio = now_utc()
+        resultado = await self.bubble.coletar()
+        self.health.mark("bubble", resultado.ok)
+        eventos = resultado.extra.get("eventos", [])
+        for ev in eventos:
+            ev = self._decidir(ev)
+        enfileirados = await self.process_events(eventos)
+        return {
+            "fontes": resultado.collected,
+            "falhas": resultado.failures,
+            "eventos": len(eventos),
+            "enfileirados": enfileirados,
+            "ms": int((now_utc() - inicio).total_seconds() * 1000),
+        }
 
     # ------------------------------------------------------------ ciclo n8n
 
