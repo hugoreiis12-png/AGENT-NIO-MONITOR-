@@ -63,6 +63,12 @@ fontes:
     - rafael.barboza@grupocampanha.com.br
     - carlos.oliveira@grupocampanha.com.br
     - elton.canto@grupocampanha.com.br
+  bubble:
+    - hugo.reis@grupocampanha.com.br
+    - rafael.barboza@grupocampanha.com.br
+    - elton.canto@grupocampanha.com.br
+    - carlos.oliveira@grupocampanha.com.br
+    - jose.wanderson@grupocampanha.com.br
 
 # Destinatario EXCLUSIVO por workflow (id): ignora projeto e autor.
 workflows:

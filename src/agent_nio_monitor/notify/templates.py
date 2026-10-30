@@ -63,6 +63,7 @@ SUBJECT = {
     "workflow_refactored": "[{sev}] {nome} foi reorganizado (sem impacto no fluxo)",
     "container_created": "[{sev}] Container criado: {nome}",
     "desktop_flow_created": "[{sev}] Fluxo de RPA criado: {nome}",
+    "bubble_api_unreachable": "[{sev}] API do Bubble indisponivel",
     "generic": "[{sev}] {titulo}",
 }
 
@@ -132,6 +133,21 @@ TEMPLATES_DE_ETAPA = (
 
 _BODY_SIMPLE = """
 {detalhe}
+
+Acao sugerida
+-------------
+{acao}
+"""
+
+_BODY_BUBBLE_API = """
+O que aconteceu
+----------------
+A API do Bubble ({api_root}) nao respondeu. O coletor tentou acessar
+{endpoint} e recebeu: {motivo}.
+
+Causa tecnica : {causa}
+Endpoint      : {endpoint}
+Status HTTP   : {status}
 
 Acao sugerida
 -------------
@@ -229,6 +245,12 @@ def render(
     _padrao(d, "titulo", event.title)
     _padrao(d, "url_workflow", "")
     _padrao(d, "acao", ACAO_PADRAO.get(template, ACAO_PADRAO["generic"]))
+    # Campos do Bubble API unreachable
+    _padrao(d, "motivo", "(sem detalhe)")
+    _padrao(d, "causa", "(nao classificada)")
+    _padrao(d, "status", "(sem resposta)")
+    _padrao(d, "endpoint", "(desconhecido)")
+    _padrao(d, "api_root", "(desconhecido)")
 
     # Espelho da linha "Acao sugerida", abaixo. Sem URL conhecida a linha
     # inteira some -- imprimir "Ver no n8n: -" e pior que nao imprimir nada.
@@ -249,6 +271,8 @@ def render(
         corpo = _BODY_ETAPAS.format(**d)
     elif template in ("workflow_changed", "workflow_refactored"):
         corpo = _BODY_CHANGED.format(**d)
+    elif template == "bubble_api_unreachable":
+        corpo = _BODY_BUBBLE_API.format(**d)
     else:
         corpo = _BODY_SIMPLE.format(**d)
 

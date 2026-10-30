@@ -130,6 +130,39 @@ class TestTemplateExecucao:
         )
         assert assunto.startswith(f"{templates.MARCA_NIO} [")
 
+    def test_bubble_api_unreachable_assunto_e_corpo(self) -> None:
+        """O alerta de API do Bubble deve trazer os detalhes técnicos no corpo,
+        nao apenas um generico 'API indisponivel'.
+
+        Na producao os campos do detail sao mesclados no contexto pelo
+        `sender.py:34`; aqui reproduzimos essa fusao."""
+        detalhe = {
+            "motivo": "503 em /meta",
+            "template": "bubble_api_unreachable",
+            "recurso": "bubble_api",
+            "api_root": "https://comprover.bubbleapps.io/api/1.1",
+            "endpoint": "/meta",
+            "status": 503,
+            "causa": "servidor retornou erro HTTP",
+            "notificar": True,
+        }
+        evento = _evento(
+            source="bubble",
+            event_type="bubble_api_unreachable",
+            severity="error",
+            title="API do Bubble indisponivel: timeout na conexao com a API do Bubble",
+            resource_id="bubble_api",
+            detail=detalhe,
+        )
+        assunto, corpo = templates.render("bubble_api_unreachable", event=evento, contexto=detalhe)
+        assert assunto.startswith(f"{templates.MARCA_POR_FONTE['bubble']} [")
+        assert "API do Bubble indisponivel" in assunto
+        # Corpo deve conter os detalhes técnicos
+        assert "503 em /meta" in corpo
+        assert "/meta" in corpo
+        assert "erro HTTP" in corpo
+        assert "comprover.bubbleapps.io" in corpo
+
     def test_assunto_sem_janela_conhecida_omite_o_sufixo(self) -> None:
         assunto, _ = templates.render(
             "workflow_failing", event=_evento(),

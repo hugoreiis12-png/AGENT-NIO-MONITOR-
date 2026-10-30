@@ -54,5 +54,12 @@ ACAO_PADRAO = {
     "workflow_refactored": "Nada a fazer: a alteracao nao muda o resultado do fluxo. Registro para auditoria.",
     "container_created": "Confirmar que o container era esperado e que a stack subiu como planejado.",
     "desktop_flow_created": "Confirmar com o responsavel que o fluxo era esperado e se ja tem maquina e agenda.",
+    "bubble_api_unreachable": (
+        "1. Verificar o status da API do Bubble no painel de monitoramento do app. "
+        "2. Conferir a conectividade de rede do host Docker com o endpoint da API "
+        "(DNS, firewall, rota). "
+        "3. Se a falha for de timeout, verificar se o servico do Bubble esta sobrecarregado. "
+        "4. Se a falha persistir, abrir chamado no suporte do Bubble com o endpoint e o status HTTP."
+    ),
     "generic": "Ver o detalhe do evento.",
 }

@@ -28,6 +28,31 @@ from ...store.repository import EventRecord, Repository, new_event_id, now_utc
 from ..base import CollectorResult
 from .client import BubbleApiError, BubbleClient
 
+# Mapeia o tipo de exceção httpx para uma descrição humana de causa.
+_CAUSA_POR_EXC_TYPE = {
+    "TimeoutException": "timeout na conexão com a API do Bubble",
+    "ConnectTimeout": "timeout ao estabelecer conexão (DNS ou rede)",
+    "ReadTimeout": "timeout ao aguardar resposta (serviço lento ou caído)",
+    "WriteTimeout": "timeout ao enviar dados (rede instável)",
+    "PoolTimeout": "pool de conexões esgotado (muitas requisições simultâneas)",
+    "NetworkError": "falha de rede (DNS, firewall ou rota)",
+    "ConnectError": "não foi possível conectar ao host (DNS ou porta fechada)",
+    "HTTPStatusError": "servidor retornou erro HTTP",
+    "ProtocolError": "erro no protocolo HTTP (resposta malformada)",
+}
+
+# Mapeia o status HTTP para uma descricao de causa (quando nao houve excecao de rede).
+_CAUSA_POR_STATUS = {
+    401: "token da API invalido ou ausente (401)",
+    403: "acesso negado pelo Bubble (403) - verificar permissao do token",
+    404: "endpoint inexistente no Bubble (404) - app pode ter sido recriado",
+    429: "limite de requisicoes excedido (429) - reduzir a cadencia do polling",
+    500: "erro interno do Bubble (500)",
+    502: "gateway do Bubble em manutencao ou instavel (502)",
+    503: "servico do Bubble indisponivel ou sobrecarregado (503)",
+    504: "gateway do Bubble excedeu o tempo de resposta (504)",
+}
+
 log = structlog.get_logger(__name__)
 
 # Types de erro monitorados (confirmados por investigacao no /meta)
@@ -82,7 +107,7 @@ class BubbleCollector:
             meta = await self.client.fetch_meta()
         except BubbleApiError as exc:
             falhas += 1
-            eventos.append(self._evento_api_indisponivel(str(exc)))
+            eventos.append(self._evento_api_indisponivel(exc))
             return CollectorResult(
                 collected=0, failures=falhas, gap=False,
                 duration_ms=int((time.monotonic() - inicio) * 1000),
@@ -90,7 +115,7 @@ class BubbleCollector:
             )
         except Exception as exc:
             falhas += 1
-            eventos.append(self._evento_api_indisponivel(f"{type(exc).__name__}: {exc}"))
+            eventos.append(self._evento_api_indisponivel(exc))
             return CollectorResult(
                 collected=0, failures=falhas, gap=False,
                 duration_ms=int((time.monotonic() - inicio) * 1000),
@@ -137,16 +162,50 @@ class BubbleCollector:
 
     # ------------------------------------------------------------- privado
 
-    def _evento_api_indisponivel(self, motivo: str) -> EventRecord:
+    def _evento_api_indisponivel(self, exc: Exception) -> EventRecord:
+        """Evento enriquecido: URL, endpoint, status, tipo de excecao e causa
+        humana. Sem isto o LLM nao tem fatos suficientes para apurar a origem
+        da falha e redige um alerta generico."""
+        motivo = redact_text(str(exc))[:MAX_ERRO]
+
+        # Extrai o endpoint da mensagem (ex.: "503 em /meta" -> "/meta")
+        endpoint = ""
+        if " em " in str(exc):
+            endpoint = str(exc).split(" em ", 1)[1].strip().rstrip(":")
+
+        # Classifica a causa: primeiro pelo tipo de excecao (erros de rede);
+        # sem isso, pelo status HTTP (5xx = problema no lado do Bubble).
+        exc_type = getattr(exc, "exc_type", None)
+        status = getattr(exc, "status", None)
+        if exc_type:
+            causa = _CAUSA_POR_EXC_TYPE.get(exc_type, f"falha nao classificada ({exc_type})")
+        elif status is not None:
+            causa = _CAUSA_POR_STATUS.get(status, f"servidor do Bubble respondeu com status {status}")
+        else:
+            causa = f"falha nao classificada ({type(exc).__name__})"
+
+        detail: dict[str, Any] = {
+            "motivo": motivo,
+            "template": "bubble_api_unreachable",
+            "recurso": "bubble_api",
+            "api_root": self.client.api_root,
+            "notificar": True,
+        }
+        if endpoint:
+            detail["endpoint"] = endpoint
+        if status:
+            detail["status"] = status
+        detail["causa"] = causa
+
         return EventRecord(
             id=new_event_id(),
             ts=now_utc(),
             source=self.source,
             event_type="bubble_api_unreachable",
             severity="error",
-            title="API do Bubble indisponivel",
+            title=f"API do Bubble indisponivel: {causa}",
             resource_id="bubble_api",
-            detail={"motivo": redact_text(motivo)[:MAX_ERRO], "notificar": True},
+            detail=detail,
         )
 
     def _diff_schema(self, meta: dict[str, Any]) -> list[EventRecord]:

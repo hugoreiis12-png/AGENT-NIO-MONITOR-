@@ -7,6 +7,8 @@ CAMPOS_DE_FATO = (
     ("ocorrencias", "Ocorrencias"), ("primeira", "Primeira falha"), ("ultima", "Ultima falha"),
     ("no", "No que falhou"), ("erro", "Erro"), ("detalhe", "Detalhe"), ("caminho", "Caminho executado"),
     ("resumo_diff", "Mudancas"), ("autor", "Ultima alteracao por"), ("logs", "Log recente"),
+    ("motivo", "Motivo"), ("causa", "Causa tecnica"), ("status", "Status HTTP"),
+    ("endpoint", "Endpoint"),
 )
 MAX_FATO = 1200
 

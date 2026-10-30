@@ -237,6 +237,32 @@ class TestPoliticaSempreIncluir:
         assert "rafael.barboza@grupocampanha.com.br" in r.emails
         assert "carlos.oliveira@grupocampanha.com.br" in r.emails
 
+    async def test_fonte_bubble_notifica_somente_a_lista_exclusiva(self) -> None:
+        """Alerta do Bubble vai SÓ para os 5 da lista em `fontes:bubble`, ignorando
+        projeto, autoria e global -- mesma semantica do powerautomate."""
+        from agent_nio_monitor.notify.people import (
+            exclusive_by_source,
+            people_by_project,
+            sempre_incluir,
+        )
+
+        esperados = {
+            "hugo.reis@grupocampanha.com.br",
+            "rafael.barboza@grupocampanha.com.br",
+            "elton.canto@grupocampanha.com.br",
+            "carlos.oliveira@grupocampanha.com.br",
+            "jose.wanderson@grupocampanha.com.br",
+        }
+        r = await RecipientResolver(
+            None,
+            people_by_project(),
+            por_fonte=exclusive_by_source(),
+            sempre_incluir=sempre_incluir(),
+        ).resolve_for_event(None, {}, fonte="bubble")
+        assert r.source == "fonte_exclusiva"
+        assert set(r.emails) == esperados
+        assert len(r.emails) == 5, "a lista exclusiva nao soma `sempre_incluir` nem outros"
+
     async def test_stack_do_portainer_notifica_dono_autor_e_o_elton(self) -> None:
         from agent_nio_monitor.notify.people import (
             people_by_project,

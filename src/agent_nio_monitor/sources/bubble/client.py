@@ -30,9 +30,12 @@ log = structlog.get_logger(__name__)
 
 
 class BubbleApiError(RuntimeError):
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None, exc_type: str | None = None):
         super().__init__(message)
         self.status = status
+        # Tipo da exceção original (TimeoutException, ConnectError, HTTPStatusError...).
+        # O coletor usa isso para classificar a causa sem depender da string.
+        self.exc_type = exc_type
 
 
 def _deve_retryar(exc: BaseException) -> bool:
@@ -98,7 +101,10 @@ class BubbleClient:
         try:
             resp = await self._client.get(f"{self.api_root}{path}", params=params)
         except httpx.HTTPError as exc:
-            raise BubbleApiError(f"erro de rede em {path}: {type(exc).__name__}") from exc
+            raise BubbleApiError(
+                f"erro de rede em {path}: {type(exc).__name__}",
+                exc_type=type(exc).__name__,
+            ) from exc
         if resp.is_error:
             raise BubbleApiError(f"{resp.status_code} em {path}", resp.status_code)
         return resp
@@ -107,7 +113,10 @@ class BubbleClient:
         try:
             resp = await self._client.post(f"{self.api_root}{path}", json=json)
         except httpx.HTTPError as exc:
-            raise BubbleApiError(f"erro de rede em {path}: {type(exc).__name__}") from exc
+            raise BubbleApiError(
+                f"erro de rede em {path}: {type(exc).__name__}",
+                exc_type=type(exc).__name__,
+            ) from exc
         if resp.is_error:
             raise BubbleApiError(f"{resp.status_code} em {path}", resp.status_code)
         return resp
@@ -145,7 +154,10 @@ class BubbleClient:
         try:
             resp = await self._client.post(f"{self.api_root}/wf/{name}", json=params or {})
         except httpx.HTTPError as exc:
-            raise BubbleApiError(f"erro de rede em /wf/{name}: {type(exc).__name__}") from exc
+            raise BubbleApiError(
+                f"erro de rede em /wf/{name}: {type(exc).__name__}",
+                exc_type=type(exc).__name__,
+            ) from exc
         if resp.status_code < 500:
             return resp.status_code, None
         try:
